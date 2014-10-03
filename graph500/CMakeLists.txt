@@ -9,7 +9,8 @@ set (sources
  compat.h        graph500.h make-edgelist.h  make-edgelist.cpp  prng.cpp   rmat.h
  kronecker.c          prng.h     verify.c verify.h
  generator/utils.h generator/utils.c generator/splittable_mrg.h
- generator/splittable_mrg.c
+ generator/splittable_mrg.c generator/make_graph.h generator/make_graph.c
+ generator/graph_generator.h generator/graph_generator.c
 )
      
 add_library(graph500 ${sources})

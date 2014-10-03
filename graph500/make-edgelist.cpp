@@ -36,6 +36,10 @@ int getedge()
 {
     return nvtx_scale * edgefactor;
 }
+uint64_t getscale()
+{
+    return SCALE;
+}
 
 int
 makeEdgeList(packed_edge * IJ)

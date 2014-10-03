@@ -85,7 +85,7 @@ main (int argc, char **argv)
       IJ = xmalloc_large_ext (nedge * sizeof (*IJ));
       rmat_edgelist (IJ, nedge, SCALE, A, B, C);
     } else {
-      //make_graph (SCALE, desired_nedge, userseed, userseed, &nedge, (packed_edge**)(&IJ));
+      make_graph (SCALE, desired_nedge, userseed, userseed, &nedge, (packed_edge**)(&IJ));
     }
     if (VERBOSE) fprintf (stderr, " done.\n");
   } else {
