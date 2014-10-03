@@ -8,4 +8,4 @@ add_hpx_executable(hpx_bgl
 SOURCES ${sources}
 FOLDER
 COMPONENT_DEPENDENCIES
-DEPENDENCIES graph500)
+DEPENDENCIES graph500 metis)

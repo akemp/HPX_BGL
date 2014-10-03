@@ -18,6 +18,8 @@
 int hpx_main(boost::program_options::variables_map &vm)
 {
     packed_edge * IJ;
+    int nedge = getedge();
+    IJ = new packed_edge[nedge];
     makeEdgeList(IJ);
     std::ofstream fout("out.txt");
     for (int i = 0; i < nedge; ++i)

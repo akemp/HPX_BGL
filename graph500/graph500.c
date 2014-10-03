@@ -19,6 +19,7 @@
 //#include <getopt.h>
 #endif
 
+#ifdef GRAPH500_ORIG
 #include "graph500.h"
 #include "rmat.h"
 #include "kronecker.h"
@@ -30,8 +31,6 @@
 #include "generator/splittable_mrg.h"
 #include "generator/graph_generator.h"
 #include "generator/make_graph.h"
-
-static int64_t nvtx_scale;
 
 static int64_t bfs_root[NBFS_max];
 
@@ -352,3 +351,4 @@ output_results (const int64_t SCALE, int64_t nvtx_scale, int64_t edgefactor,
   statistics (stats, tm, NBFS);
   PRINT_STATS("TEPS", 1);
 }
+#endif

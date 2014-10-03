@@ -25,6 +25,8 @@ int NBFS = 64;
 int64_t SCALE = default_SCALE;
 int64_t edgefactor = default_edgefactor;
 
+int64_t nvtx_scale = 1L << SCALE;
+
 void get_options (int argc, char **argv);
 
 #endif /* OPTIONS_HEADER_ */
