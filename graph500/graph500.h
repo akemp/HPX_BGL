@@ -8,6 +8,7 @@
 #define VERSION 0
 
 #include "generator/graph_generator.h"
+#include "verify.h"
 
 /** Pass the edge list to an external graph creation routine. */
 int create_graph_from_edgelist (struct packed_edge *IJ, int64_t nedge);
@@ -19,4 +20,9 @@ int make_bfs_tree (int64_t *bfs_tree_out, int64_t *max_vtx_out,
 /** Clean up. */
 void destroy_graph (void);
 
+void
+run_bfs(packed_edge * IJ, int NBFS_max, int64_t nvtx_scale, int NBFS, int64_t nedge);
+
+int
+create_graph_from_edgelist(struct packed_edge *IJ_in, int64_t nedge);
 #endif /* GRAPH500_HEADER_ */

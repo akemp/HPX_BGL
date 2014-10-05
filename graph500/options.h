@@ -22,7 +22,7 @@ int NBFS = 64;
 #define default_SCALE ((int64_t)14)
 #define default_edgefactor ((int64_t)16)
 
-int64_t SCALE = default_SCALE;
+const int64_t SCALE = default_SCALE;
 int64_t edgefactor = default_edgefactor;
 
 int64_t nvtx_scale = 1L << SCALE;

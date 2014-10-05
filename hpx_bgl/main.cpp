@@ -12,6 +12,7 @@
 
 #include <hpx/util/high_resolution_timer.hpp>
 #include "../graph500/make-edgelist.h"
+#include "../graph500/graph500.h"
 #include "../graph500/generator/make_graph.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -20,16 +21,23 @@ int hpx_main(boost::program_options::variables_map &vm)
     packed_edge * IJ;
     int64_t nedge = getedge();
     uint64_t scale = getscale();
-    //IJ = new packed_edge[nedge];
+    IJ = new packed_edge[nedge];
+
+    makeEdgeList(IJ);
     int64_t desired_nedge = nedge;
     uint64_t userseed = 10214;
-    make_graph((int)scale, desired_nedge, userseed, userseed, &nedge, (packed_edge**)(&IJ));
+    //make_graph((int)scale, desired_nedge, userseed, userseed, &nedge, (packed_edge**)(&IJ));
+    
+    //create_graph_from_edgelist(IJ, nedge);
+    /*
     std::ofstream fout("out.txt");
     for (int i = 0; i < nedge; ++i)
     {
         fout << IJ[i].v0_low << " " << IJ[i].v1_low << std::endl;;
     }
     fout.close();
+    */
+    run_bfs(IJ, getNBFS_max(), getnvtx_scale(), getNBFS(), nedge);
     hpx::finalize();
     return 0;
 }

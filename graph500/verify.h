@@ -7,8 +7,9 @@
 #include "generator/graph_generator.h"
 
 /** Verify a BFS tree, return volume or -1 if failed. */
-int64_t verify_bfs_tree (int64_t *bfs_tree, int64_t max_bfsvtx,
-			 int64_t root,
-			 const struct packed_edge *IJ, int64_t nedge);
+int64_t
+verify_bfs_tree(int64_t *bfs_tree_in, int64_t max_bfsvtx,
+int64_t root,
+const packed_edge *IJ_in, int64_t nedge);
 
 #endif /* VERIFY_HEADER_ */

@@ -40,7 +40,18 @@ uint64_t getscale()
 {
     return SCALE;
 }
-
+int64_t getnvtx_scale()
+{
+    return nvtx_scale;
+}
+int getNBFS_max()
+{
+    return NBFS_max;
+}
+int getNBFS()
+{
+    return NBFS;
+}
 int
 makeEdgeList(packed_edge * IJ)
 {
