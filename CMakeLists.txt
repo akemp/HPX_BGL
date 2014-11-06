@@ -4,7 +4,11 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
 if(NOT HPX_ROOT)
-  set (HPX_ROOT $ENV{HPX_BIN_ROOT})
+  if ($ENV{HPX_BIN_ROOT})
+    set (HPX_ROOT $ENV{HPX_BIN_ROOT})
+  else()
+    set (HPX_ROOT $ENV{HPX_ROOT})
+  endif()
 endif()
 # Find and include HPX settings
 if(NOT HPX_ROOT)
