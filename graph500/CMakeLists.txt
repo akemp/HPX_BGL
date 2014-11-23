@@ -5,7 +5,7 @@
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
 set (sources
- graph500.cpp   kronecker.h        options.h  rmat.cpp  xalloc.c
+ kronecker.h        options.h  rmat.cpp  xalloc.c
  compat.h        graph500.h make-edgelist.h  make-edgelist.cpp  prng.cpp   rmat.h
  kronecker.c          prng.h     verify.cpp verify.h
  generator/utils.h generator/utils.c generator/splittable_mrg.h
