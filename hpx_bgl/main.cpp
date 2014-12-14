@@ -14,7 +14,6 @@
 #include <hpx/util/high_resolution_timer.hpp>
 
 #include <boost/throw_exception.hpp>
-#include <boost/graph/metis.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/breadth_first_search.hpp>
 
@@ -25,26 +24,34 @@ typedef boost::adjacency_list < boost::vecS, boost::vecS, boost::undirectedS > g
 typedef std::pair < int, int > Edge;
 typedef std::vector<Edge> Edges;
 
-///////////////////////////////////////////////////////////////////////////////
-int init()//hpx_main(boost::program_options::variables_map &vm)
+int getres(std::vector<idx_t> xadj, std::vector<idx_t> adjncy, std::vector<idx_t> &part)
 {
-	using namespace std;
-	int result;
+
 	// Needed by parmetis
-	idx_t nvtxs = 15, ncon = 1;
-	idx_t *xadj = NULL, *vsize = NULL, *adjncy = NULL;
+	idx_t nvtxs = xadj.size()-1, ncon = 1;
+	idx_t *vsize = NULL;
 	idx_t *vwgt = NULL, *adjwgt = NULL;
 
 	idx_t nparts = 3;
 	real_t *tpwgts = NULL, *ubvec = NULL;
 	idx_t *options = NULL;
 	idx_t objval;
-	idx_t part[15];
+	int result = METIS_PartGraphKway(&nvtxs, &ncon, &xadj[0], &adjncy[0], vwgt,
+		vsize, adjwgt, &nparts, tpwgts,
+		ubvec, options, &objval, &part[0]);
+	return result;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+int init()//hpx_main(boost::program_options::variables_map &vm)
+{
+	using namespace std;
+	int result;
 
 	cout << " Metis example from LiberLocus." << '\n';
 
-	xadj = new idx_t[16];
-	adjncy = new idx_t[44];
+	vector<idx_t> xadj(16);
+	vector<idx_t> adjncy(44);
 
 	xadj[0] = 0;
 	xadj[1] = 2;
@@ -108,21 +115,17 @@ int init()//hpx_main(boost::program_options::variables_map &vm)
 	adjncy[42] = 9;
 	adjncy[43] = 13;
 
-	//  result = METIS_PartGraphRecursive( &nvtxs, &ncon, xadj, adjncy, vwgt,
-	//                                     vsize, adjwgt, &nparts, tpwgts,
-	//                                     ubvec, options, &objval, part);
-	result = METIS_PartGraphKway(&nvtxs, &ncon, xadj, adjncy, vwgt,
-		vsize, adjwgt, &nparts, tpwgts,
-		ubvec, options, &objval, part);
 
+	vector<idx_t> part(15);
+	getres(xadj, adjncy, part);
 	cout << "npart is " << '\n';
 	for (int i = 0; i<15; i++){
 		cout << part[i] << " ";
 	}
 	cout << '\n';
 
-	delete xadj;
-	delete adjncy;
+//	delete xadj;
+//	delete adjncy;
 
 	cout << "Metis returned successfully." << '\n';
 
