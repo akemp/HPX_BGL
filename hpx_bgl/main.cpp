@@ -3,19 +3,17 @@
 //  Distributed under the Boost Software License, Version 1.0. (See accompanying
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
+#include <hpx/hpx_init.hpp>
+#include <hpx/include/actions.hpp>
+
 #include <fstream>
 #include <iostream>
 #include <vector>
 #include <queue>
 #include "../metis/include/metis.h"
-//#include <hpx/hpx.hpp>
-//#include <hpx/hpx_init.hpp>
 
-#include <hpx/util/high_resolution_timer.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/breadth_first_search.hpp>
-#include <boost/pending/indirect_cmp.hpp>
-#include <boost/range/irange.hpp>
 
 
 typedef boost::adjacency_list < boost::vecS, boost::vecS, boost::undirectedS > graph_t;
@@ -72,23 +70,41 @@ void createEdges(const std::vector<std::vector<idx_t>>& nodes, std::vector<Edge>
 	return;
 }
 
-
 using namespace boost;
+
+typedef adjacency_list < vecS, vecS, undirectedS > graph_t;
+
+
 template < typename TimeMap > class bfs_time_visitor :public default_bfs_visitor {
 	typedef typename property_traits < TimeMap >::value_type T;
 public:
 	bfs_time_visitor(TimeMap tmap, T & t) :m_timemap(tmap), m_time(t) { }
-	template < typename Vertex, typename Graph >
+	/*template < typename Vertex, typename Graph >
 	void discover_vertex(Vertex u, const Graph & g) const
 	{
-		put(m_timemap, u, m_time++);
+		int val = get(m_timemap, u);
+		if (val != m_time)
+		{
+			std::cout << "Changing indices to " << val << " from " << m_time << std::endl;
+		}
+	}*/
+	template < typename Edge, typename Graph >
+	void gray_target(Edge e, const Graph & g) const
+	{
+		int src = get(m_timemap, source(e, g));
+		int targ = get(m_timemap, target(e, g));
+		if (src != targ)
+		{
+
+		}
+		
 	}
 	TimeMap m_timemap;
 	T & m_time;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-int init()//hpx_main(boost::program_options::variables_map &vm)
+int hpx_main()
 {
 	using namespace std;
 	int result;
@@ -112,12 +128,6 @@ int init()//hpx_main(boost::program_options::variables_map &vm)
 
 	vector<idx_t> part(xadj.size());
 	int res = getres(xadj, adjncy, part, 16);
-	/*cout << res << endl;
-	cout << "npart is " << '\n';
-	for (int i = 0; i<part.size(); i++){
-		cout << part[i] << " ";
-	}
-	cout << '\n';*/
 	vector<Edge> edges;
 	createEdges(nodes, edges);
 	graph_t g(nodes.size());
@@ -128,17 +138,8 @@ int init()//hpx_main(boost::program_options::variables_map &vm)
 	{
 		using namespace boost;
 		// Select the graph type we wish to use
-		typedef adjacency_list < vecS, vecS, undirectedS > graph_t;
-		// Set up the vertex IDs and names
-		const char *name = "rstuvwxy";
-		// Specify the edges in the graph
-		/*typedef std::pair < int, int >E;
-		E edge_array[] = { E(r, s), E(r, v), E(s, w), E(w, r), E(w, t),
-			E(w, x), E(x, t), E(t, u), E(x, y), E(u, y)
-		};*/
 		// Create the graph object
 		const int n_edges = edges.size();//sizeof(edge_array) / sizeof(E);
-		// VC++ has trouble with the edge iterator constructor
 		graph_t g(nodes.size());
 		for (std::size_t j = 0; j < n_edges; ++j)
 			add_edge(edges[j].first, edges[j].second, g);
@@ -148,6 +149,9 @@ int init()//hpx_main(boost::program_options::variables_map &vm)
 
 		// a vector to hold the discover time property for each vertex
 		std::vector < Size > dtime(num_vertices(g));
+		for (int i = 0; i < dtime.size(); ++i)
+			dtime[i] = part[i];
+		
 		typedef
 			iterator_property_map < std::vector<Size>::iterator,
 			property_map<graph_t, vertex_index_t>::const_type >
@@ -157,7 +161,7 @@ int init()//hpx_main(boost::program_options::variables_map &vm)
 		Size time = 0;
 		bfs_time_visitor < dtime_pm_type >vis(dtime_pm, time);
 		breadth_first_search(g, vertex(3, g), visitor(vis));
-
+		/*
 		// Use std::sort to order the vertices by their discover time
 		std::vector<graph_traits<graph_t>::vertices_size_type > discover_order(nodes.size());
 		integer_range < int >range(0, nodes.size());
@@ -169,10 +173,11 @@ int init()//hpx_main(boost::program_options::variables_map &vm)
 		for (int i = 0; i < nodes.size(); ++i)
 			std::cout << discover_order[i] << " ";
 		std::cout << std::endl;
+		*/
 	}
 
-	return 0;
+	return hpx::finalize();
 }
 int main() {
-    return init();//hpx::init();
+	return hpx::init();
 }
