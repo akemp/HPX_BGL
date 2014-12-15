@@ -32,7 +32,7 @@ find_package(HPX)
 include_directories(${HPX_INCLUDE_DIR})
 link_directories(${HPX_LIBRARY_DIR})
 include_directories($ENV{BOOST_ROOT})
-link_directories($ENV{BOOST_ROOT})
+link_directories($ENV{BOOST_ROOT}/lib)
 
 # Adjust auxiliary build settings for HPX to work properly
 if(NOT MSVC)

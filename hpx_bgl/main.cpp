@@ -24,7 +24,8 @@ typedef boost::adjacency_list < boost::vecS, boost::vecS, boost::undirectedS > g
 typedef std::pair < int, int > Edge;
 typedef std::vector<Edge> Edges;
 
-int getres(std::vector<idx_t> xadj, std::vector<idx_t> adjncy, std::vector<idx_t> &part)
+int getres(std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy, std::vector<idx_t> &part,
+	idx_t nparts)
 {
 
 	// Needed by parmetis
@@ -32,14 +33,30 @@ int getres(std::vector<idx_t> xadj, std::vector<idx_t> adjncy, std::vector<idx_t
 	idx_t *vsize = NULL;
 	idx_t *vwgt = NULL, *adjwgt = NULL;
 
-	idx_t nparts = 3;
 	real_t *tpwgts = NULL, *ubvec = NULL;
 	idx_t *options = NULL;
 	idx_t objval;
-	int result = METIS_PartGraphKway(&nvtxs, &ncon, &xadj[0], &adjncy[0], vwgt,
+	int result = METIS_PartGraphKway(
+		&nvtxs, &ncon, &xadj[0], &adjncy[0], vwgt,
 		vsize, adjwgt, &nparts, tpwgts,
 		ubvec, options, &objval, &part[0]);
 	return result;
+}
+
+void toCSR(const std::vector<std::vector<idx_t>>& links, std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy)
+{
+	int total = 0;
+	xadj.push_back(0);
+	for (int i = 0; i < links.size(); ++i)
+	{
+		for (int j = 0; j < links[i].size(); ++j)
+		{
+			adjncy.push_back(links[i][j]);
+			++total;
+		}
+		xadj.push_back(total);
+	}
+	return;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -47,79 +64,28 @@ int init()//hpx_main(boost::program_options::variables_map &vm)
 {
 	using namespace std;
 	int result;
+	//from librelocus
 
-	cout << " Metis example from LiberLocus." << '\n';
+	vector<idx_t> xadj;
+	vector<idx_t> adjncy;
 
-	vector<idx_t> xadj(16);
-	vector<idx_t> adjncy(44);
+	vector<vector<idx_t>> edges(32);
+	for (int i = 0; i < edges.size(); ++i)
+	{
+		vector<idx_t> edger;
+		for (int j = 0; j < rand() % 6; ++j)
+		{
+			edger.push_back(rand() % edges.size());
+		}
+		edges[i] = edger;
+	}
+	toCSR(edges, xadj, adjncy);
 
-	xadj[0] = 0;
-	xadj[1] = 2;
-	xadj[2] = 5;
-	xadj[3] = 8;
-	xadj[4] = 11;
-	xadj[5] = 13;
-	xadj[6] = 16;
-	xadj[7] = 20;
-	xadj[8] = 24;
-	xadj[9] = 28;
-	xadj[10] = 31;
-	xadj[11] = 33;
-	xadj[12] = 36;
-	xadj[13] = 39;
-	xadj[14] = 42;
-	xadj[15] = 44;
-
-	adjncy[0] = 1;
-	adjncy[1] = 5;
-	adjncy[2] = 0;
-	adjncy[3] = 2;
-	adjncy[4] = 6;
-	adjncy[5] = 1;
-	adjncy[6] = 3;
-	adjncy[7] = 7;
-	adjncy[8] = 2;
-	adjncy[9] = 4;
-	adjncy[10] = 8;
-	adjncy[11] = 3;
-	adjncy[12] = 9;
-	adjncy[13] = 0;
-	adjncy[14] = 6;
-	adjncy[15] = 10;
-	adjncy[16] = 1;
-	adjncy[17] = 5;
-	adjncy[18] = 7;
-	adjncy[19] = 11;
-	adjncy[20] = 2;
-	adjncy[21] = 6;
-	adjncy[22] = 8;
-	adjncy[23] = 12;
-	adjncy[24] = 3;
-	adjncy[25] = 7;
-	adjncy[26] = 9;
-	adjncy[27] = 13;
-	adjncy[28] = 4;
-	adjncy[29] = 8;
-	adjncy[30] = 14;
-	adjncy[31] = 5;
-	adjncy[32] = 11;
-	adjncy[33] = 6;
-	adjncy[34] = 10;
-	adjncy[35] = 12;
-	adjncy[36] = 7;
-	adjncy[37] = 11;
-	adjncy[38] = 13;
-	adjncy[39] = 8;
-	adjncy[40] = 12;
-	adjncy[41] = 14;
-	adjncy[42] = 9;
-	adjncy[43] = 13;
-
-
-	vector<idx_t> part(15);
-	getres(xadj, adjncy, part);
+	vector<idx_t> part(xadj.size());
+	int res = getres(xadj, adjncy, part, 3);
+	cout << res << endl;
 	cout << "npart is " << '\n';
-	for (int i = 0; i<15; i++){
+	for (int i = 0; i<part.size(); i++){
 		cout << part[i] << " ";
 	}
 	cout << '\n';
