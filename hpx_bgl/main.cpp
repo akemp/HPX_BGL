@@ -1,4 +1,4 @@
-//  Copyright (c) 2011 Matthew Anderson
+//  Copyright (c) 2014 Andrew Kemp
 //
 //  Distributed under the Boost Software License, Version 1.0. (See accompanying
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -6,6 +6,7 @@
 #include <hpx/hpx_init.hpp>
 #include <hpx/include/runtime.hpp>
 #include <hpx/include/thread_executors.hpp>
+#include <hpx/util/high_resolution_timer.hpp>
 
 #include <fstream>
 #include <iostream>
@@ -13,6 +14,7 @@
 #include <queue>
 #include "../metis/include/metis.h"
 
+#include <boost/random.hpp>
 #include <boost/shared_array.hpp>
 #include <boost/format.hpp>
 #include <boost/graph/adjacency_list.hpp>
@@ -72,81 +74,207 @@ void createEdges(const std::vector<std::vector<idx_t>>& nodes, std::vector<Edge>
 
 using namespace boost;
 
-struct partition
-{
-	int part;
-};
+typedef struct vpartition;
 
-typedef adjacency_list < vecS, vecS, undirectedS, partition > graph_t;
+typedef adjacency_list < vecS, vecS, directedS, vpartition > graph_t;
 
+typedef graph_traits < graph_t >::vertices_size_type Size;
 
+typedef
+iterator_property_map < std::vector<Size>::iterator,
+property_map<graph_t, vertex_index_t>::const_type >
+bfstree_pm_type;
+
+void runGraph(
+	Size child,
+	Size part,
+	graph_t* graph,
+	std::vector < Size >* bfstree,
+	std::vector<boost::default_color_type>* colorMap,
+	int* locked,
+	Size start);
 template < typename TimeMap > class bfs_time_visitor :public default_bfs_visitor {
 	typedef typename property_traits < TimeMap >::value_type T;
 public:
-	bfs_time_visitor(TimeMap tmap, T & t) :m_timemap(tmap), m_time(t) { }
-	/*template < typename Vertex, typename Graph >
-	void discover_vertex(Vertex u, const Graph & g) const
-	{
-		int val = get(m_timemap, u);
-		if (val != m_time)
-		{
-			std::cout << "Changing indices to " << val << " from " << m_time << std::endl;
-		}
-	}*/
-	template < typename Edge, typename Graph >
-	void gray_target(Edge e, const Graph & g) const
-	{
-		/*int src = get(m_timemap, source(e, g));
-		int targ = get(m_timemap, target(e, g));
-		if (src != targ)
-		{
+	bfs_time_visitor(TimeMap tmap, T & t, Size s) :m_timemap(tmap), m_time(t), starter(s) { }
 
-		}*/
-		put(m_timemap, source(e, g), target(e, g));
+	template < typename Edge, typename Graph >
+	void examine_edge(Edge e, const Graph & g) 
+	{
+		Size src = source(e, g);
+		Size targ = target(e, g);
+		Size checker = get(m_timemap, targ);
+		Size start = g[src].start;
+		if (checker >= num_vertices(g))
+		{
+			put(m_timemap, targ, src); // put source vertex in target vertex
+		}
+		else
+		{
+			int count1 = 0;
+			int count2 = 0;
+			Size tester = checker;
+			while (tester != start)
+			{
+				tester = get(m_timemap, tester);
+				++count1;
+			}
+			tester = src;
+			while (tester != start)
+			{
+				tester = get(m_timemap, tester);
+				++count2;
+			}
+			if (count1 > count2)
+				put(m_timemap, targ, src); // put source vertex in target vertex
+		}
+	}
+	template < typename Vertex, typename Graph >
+	void finish_vertex(Vertex u, const Graph & g)
+	{
+		Size targ = u;
+		if (g[u].part != m_time)
+		{
+			//hpx::async(&runGraph,targ, g[targ].part, g[targ].graph, g[targ].bfstree, g[targ].colorMap, g[targ].locked, g[targ].start);
+			runGraph( targ, g[targ].part, g[targ].graph, g[targ].bfstree, g[targ].colorMap, g[targ].locked, g[targ].start);
+		}
 	}
 	TimeMap m_timemap;
 	T & m_time;
+	Size starter;
+	std::vector<int> touse;
+	bool used = true;
 };
 
-void runBFS(std::vector<std::vector<idx_t>> &nodes, std::vector<Edge>& edges, int start)
+void runGraph(
+	Size child,
+	Size part,
+	graph_t* graph,
+	std::vector < Size >* bfstree,
+	std::vector<boost::default_color_type>* colorMap,
+	int* locked,
+	Size start)
 {
+	*locked = 1;
+	bfstree_pm_type parents(bfstree->begin(), get(vertex_index, *graph));
+	bfs_time_visitor < bfstree_pm_type >vis(parents, part, start);
+	typedef
+		iterator_property_map < std::vector<boost::default_color_type>::iterator,
+		property_map<graph_t, vertex_index_t>::const_type >
+		colormap_t;
 
+	colormap_t colors(colorMap->begin(), get(vertex_index, *graph)); //Create a color map
+
+	breadth_first_visit(*graph, vertex(child, *graph), visitor(vis).vertex_color_map(colors));
+	*locked = 0;
+	return;
+}
+
+struct vpartition
+{
+	Size part;
+	bool present;
+	graph_t* graph;
+	std::vector < Size >* bfstree;
+	std::vector<boost::default_color_type>* colorMap;
+	Size start;
+	int* locked;
+};
+void runPartition(graph_t g, std::vector < Size >& bfstree, std::vector<Edge>& edges,int start, int partitions)
+{
+	using namespace std;
+	std::vector<boost::default_color_type> colorMap(bfstree.size());
+	vector<graph_t> graphs(partitions);
+	vector<int> locks(partitions, 0);
+	for (int k = 0; k < partitions; ++k)
 	{
-		graph_t g(nodes.size());
-		using namespace boost;
-		using namespace std;
-		// Select the graph type we wish to use
-		// Create the graph object
-		const int n_edges = edges.size();//sizeof(edge_array) / sizeof(E);
-		for (std::size_t j = 0; j < n_edges; ++j)
-			add_edge(edges[j].first, edges[j].second, g);
-
-		// Typedefs
-		typedef graph_traits < graph_t >::vertices_size_type Size;
-
-		// a vector to hold the discover time property for each vertex
-		std::vector < Size > bfstree(num_vertices(g));
-		//for (int i = 0; i < bfstree.size(); ++i)
-		//	bfstree[i] = part[i];
-
-		typedef
-			iterator_property_map < std::vector<Size>::iterator,
-			property_map<graph_t, vertex_index_t>::const_type >
-			bfstree_pm_type;
-		bfstree_pm_type parents(bfstree.begin(), get(vertex_index, g));
-
-/*		for (int i = 0; i < num_vertices(g); ++i)
-		{
-			g[i].part = part[i];
-		}
-*/
-		Size time = 0;
-		bfs_time_visitor < bfstree_pm_type >vis(parents, time);
-		breadth_first_search(g, vertex(start, g), visitor(vis));
-		//for (int i = 0; i < bfstree.size(); ++i)
-		//	cout << bfstree[i] << " ";
-
+		graphs[k] = g;
+		locks[k] = false;
+		vpartition part;
+		part.part = k;
+		part.start = start;
+		part.present = 0;
+		part.graph = &graphs[k];
+		part.bfstree = &bfstree;
+		part.colorMap = &colorMap;
+		part.locked =  &(locks[k]);
+		std::fill(graphs[k].m_vertices.begin(), graphs[k].m_vertices.end(), part);
 	}
+	for (int k = 0; k < partitions; ++k)
+	{
+		for (std::size_t i = 0; i < edges.size(); ++i)
+		{
+			Edge e = edges[i];
+			if (g[e.first].part == k && g[e.second].part == k)
+			{
+				add_edge(e.first, e.second, graphs[k]);
+				add_edge(e.second, e.first, graphs[k]);
+			}
+			else if (g[e.first].part == k)
+			{
+				add_edge(e.first, e.second, graphs[k]);
+				Size part = g[e.second].part;
+				graphs[k][e.second].graph = &(graphs[part]);
+				graphs[k][e.second].part = part;
+			}
+
+			else if (g[e.second].part == k)
+			{
+				add_edge(e.second, e.first, graphs[k]);
+				Size part = g[e.first].part;
+				graphs[k][e.first].graph = &(graphs[part]);
+				graphs[k][e.first].part = part;
+			}
+		}
+	}
+	
+	Size loc = g[start].part;
+	runGraph(start, loc, graphs[loc][start].graph, graphs[loc][start].bfstree, graphs[loc][start].colorMap, graphs[loc][start].locked, start);
+	hpx::wait_all();
+	return;
+}
+
+void runBFS(std::vector<std::vector<idx_t>> &nodes, std::vector<int>& part, int start, int partitions,
+	std::vector < Size >& bfstree)
+{
+	using namespace std;
+
+	vector<Edge> edges;
+	createEdges(nodes, edges);
+
+	// a vector to hold the parent property for each vertex
+
+
+	int size = nodes.size();
+	graph_t g(size);
+	for (int i = 0; i < nodes.size(); ++i)
+	{
+		g[i].part = part[i];
+	}
+
+	bfstree[start] = start;
+	runPartition( g, bfstree, edges, start, partitions);
+
+	boost::random::mt19937 rng;
+	boost::random::uniform_int_distribution<> randnodes(0, nodes.size() - 1);
+	/**/
+	for (int i = 0; i < 32; ++i)
+	{
+		int sample = randnodes(rng);
+		cout << sample << " ";
+		while (sample != start)
+		{
+			if (sample >= nodes.size())
+			{
+				cout << "\nERROR!\n";
+				break;
+			}
+			sample = bfstree[sample];
+			cout << sample << " ";
+		}
+		cout << endl;
+	}
+	return;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -154,39 +282,52 @@ int hpx_main()
 {
 	using namespace std;
 	int result;
-	cout << hpx::get_os_thread_count() << endl;
-	//from librelocus
-
+	cout << "threads: " << hpx::get_os_thread_count() << endl;
 	vector<idx_t> xadj;
 	vector<idx_t> adjncy;
 
-	vector<vector<idx_t>> nodes(4096);
+	vector<vector<idx_t>> nodes(8192);
+	boost::random::mt19937 rng;
+	boost::random::uniform_int_distribution<> randnodes(0, nodes.size()-1);
 	for (int i = 0; i < nodes.size(); ++i)
 	{
 		vector<idx_t> edger;
-		int ind = rand() % 24;
+		int ind = 200;
 		for (int j = 0; j < ind; ++j)
 		{
-			edger.push_back(rand() % (nodes.size()-1));
+			int spot = randnodes(rng);
+			if (spot != i && std::find(nodes[spot].begin(), nodes[spot].end(), i) == nodes[spot].end())
+				edger.push_back(spot);
 		}
 		nodes[i] = edger;
 	}
 	toCSR(nodes, xadj, adjncy);
 
 
-	vector<idx_t> part(xadj.size());
-	int res = getres(xadj, adjncy, part, 16);
+	vector<idx_t> part(xadj.size()-1);
+	
+	int partitions = 30;
+	cout << endl << "Enter partitions: ";
+	cin >> partitions;
 
+	int res = getres(xadj, adjncy, part, partitions);
 
+	hpx::util::high_resolution_timer t;
+	vector<hpx::future<void>> futures;
 
-	vector<Edge> edges;
-	createEdges(nodes, edges);
-
-	for (int i = 0; i < 4; ++i)
-		hpx::async(hpx::util::bind(&runBFS, nodes, edges, rand()%nodes.size()));
-	hpx::wait_all();
+	vector<Size> bfstree(nodes.size(), nodes.size());
+	//for (int i = 0; i < 1; ++i)
+	Size randomval = randnodes(rng);
+	runBFS(nodes, part, randomval, partitions, bfstree);
+	cout << "time taken: " << t.elapsed() << "s" << endl;
+	std::fill(part.begin(), part.end(), 0);
+	std::fill(bfstree.begin(), bfstree.end(), nodes.size());
+	cout << "Serial:\n";
+	runBFS(nodes, part, randomval, partitions, bfstree);
 	return hpx::finalize();
 }
-int main(int argc, char* argv[]) {
+
+int main(int argc, char* argv[]) 
+{
 	return hpx::init(argc, argv);
 }
