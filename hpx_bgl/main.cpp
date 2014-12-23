@@ -60,7 +60,7 @@ using namespace boost;
 
 typedef struct vpartition;
 
-typedef adjacency_list < vecS, vecS, directedS, vpartition > graph_t;
+typedef adjacency_list < vecS, vecS, undirectedS, vpartition > graph_t;
 
 typedef graph_traits < graph_t >::vertices_size_type Size;
 
@@ -99,7 +99,7 @@ public:
 	bfs_time_visitor(TimeMap tmap, T & t, Size s) :m_timemap(tmap), m_time(t), starter(s) { }
 
 	template < typename Edge, typename Graph >
-	void examine_edge(Edge e, const Graph & g)
+	void tree_edge(Edge e, const Graph & g)
 	{
 		Size src = source(e, g);
 		Size targ = target(e, g);
@@ -111,8 +111,7 @@ public:
 		}
 		else
 		{
-			if (checker != src && checker != targ)
-				runTest(checker, start, src, targ);
+			runTest(checker, start, src, targ);
 		}
 	}
 	template < typename Vertex, typename Graph >
@@ -216,7 +215,7 @@ inline void runBFS(std::vector<std::vector<idx_t>> &nodes, std::vector<int>& par
 			if (g[e.first].part == k && g[e.second].part == k)
 			{
 				add_edge(e.first, e.second, graphs[k].graph);
-				add_edge(e.second, e.first, graphs[k].graph);
+				//add_edge(e.second, e.first, graphs[k].graph);
 			}
 			else if (g[e.first].part == k)
 			{
