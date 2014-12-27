@@ -14,7 +14,7 @@ struct first_name_t {
 	typedef boost::vertex_property_tag kind;
 };
 
-typedef boost::property<first_name_t, std::tuple<int, bool, int, int>> Color; //parent, color, partition, distance
+typedef boost::property<first_name_t, int> Color; //parent, color, partition, distance
 typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
 	Color> Graph;
 int get_parts(std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy, std::vector<idx_t> &part,
@@ -61,201 +61,53 @@ void createEdges(const std::vector<std::vector<idx_t>>& nodes, Edges& edges)
 	}
 	return;
 }
+
 typedef struct Subgraph;
-void bfs_search_async(Subgraph* s, int index, int parent, int dist);
 
 typedef hpx::lcos::local::spinlock mutex_type;
 
-struct pennant
-{
-	pennant*left;
-	pennant* right;
-	int value;
-	int dist;
-	int parent;
-	pennant()
-	{
-		value = 0;
-		left = nullptr;
-		right = nullptr;
-	};
-	pennant(int val)
-	{
-		value = val;
-		left = nullptr;
-		right = nullptr;
-	};
-
-};
-
-pennant* merge(pennant* x, pennant* y)
-{
-	y->right = x->left;
-	x->left = y;
-	return y;
-}
-pennant* split(pennant* x)
-{
-	pennant* y = x->left;
-	x->left = y->right;
-	y->right = nullptr;
-	return y;
-}
-
-
-
-typedef pair<pennant*, pennant*> fapair;
-
-#define falsepen nullptr
-
-fapair FA(pennant* x, pennant* y, pennant* z)
-{
-	if (x != nullptr && y == nullptr && z == nullptr)
-	{
-		return fapair(x, falsepen);
-	}
-	if (x == nullptr && y != nullptr && z == nullptr)
-	{
-		return fapair(y, falsepen);
-	}
-	if (x == nullptr && y == nullptr && z != nullptr)
-	{
-		return fapair(z, falsepen);
-	}
-	if (x != nullptr && y != nullptr && z == nullptr)
-	{
-		return fapair(falsepen, merge(x, y));
-	}
-	if (x != nullptr && y == nullptr && z != nullptr)
-	{
-		return fapair(falsepen, merge(x, z));
-	}
-	if (x == nullptr && y != nullptr && z != nullptr)
-	{
-		return fapair(falsepen, merge(y, z));
-	}
-	if (x != nullptr && y != nullptr && z != nullptr)
-	{
-		return fapair(x, merge(y, z));
-	}
-	//false,false,false
-	return fapair(falsepen, falsepen);
-}
-struct bag
-{
-	vector<pennant*> values;
-	int range;
-	bag(int allocate)
-	{
-		values = vector<pennant*>(allocate, falsepen);
-		range = allocate;
-	};
-	bag()
-	{
-		range = 0;
-	};
-	bool empty()
-	{
-		for (int i = 0; i < values.size(); ++i)
-		{
-			if (values[i] != nullptr)
-				return false;
-		}
-		return true;
-	}
-	int size()
-	{
-		int count = 0;
-		for (int i = 0; i < values.size(); ++i)
-		{
-			if (values[i] != nullptr)
-				++count;
-		}
-		return count;
-	}
-	void insert(pennant* x)
-	{
-		int k = 0;
-		while (values[k] != nullptr)
-		{
-			x = merge(values[k], x);
-			values[k++] = nullptr;
-		}
-		values[k] = x;
-	}
-	void bag_merge(bag b)
-	{
-		pennant* y = falsepen;
-		for (int k = 0; k < range; ++k)
-		{
-			fapair p = FA(values[k], b.values[k],y);
-			values[k] = p.first;
-			y = p.second;
-		}
-	}
-	bag bag_split()
-	{
-		bag s = bag(range);
-		pennant* y = values[0];
-		values[0] = falsepen;
-		for (int k = 1; k < range; ++k)
-		{
-			if (values[k] != nullptr)
-			{
-				s.values[k - 1] = values[k];
-				values[k - 1] = values[k];
-				values[k] = falsepen;
-			}
-		}
-		if (y != nullptr)
-			insert(y);
-		return s;
-	}
-};
-
+vector<int> process_layor(vector<int>::iterator in_bag, Graph* g, int grainsize);
 
 struct Subgraph
 {
 	Graph g;
-	std::vector<pennant> pennants;
+	//std::vector<int> pennants;
 	int grainsize = 9999;
-	mutex_type* m;
+	void reset()
+	{
+
+		property_map<Graph, first_name_t>::type
+			name = get(first_name_t(), g);
+		for (int i = 0; i < num_vertices(g); ++i)
+			name[i] = -1;
+	}
 	void bfs_search(int index)
 	{
 		property_map < Graph, vertex_index_t >::type
 			index_map = get(vertex_index, g);
-		pennants = std::vector <pennant>(num_vertices(g));
-		for (int i = 0; i < pennants.size(); ++i)
-		{
-			pennants[i].value = i;
-			pennants[i].dist = 999999999;
-			pennants[i].parent = -1;
-		}
-		pennants[index].parent = index;
-		pennants[index].dist = 0;
-		std::queue<int> q;
-		q.push(index);
+		property_map<Graph, first_name_t>::type
+			name = get(first_name_t(), g);
+		//pennants = std::vector <int>(num_vertices(g), -1);
+		name[index] = index;
+		list<int> q;
+		q.push_back(index);
 		int dist = 0;
 
 		while (!q.empty())
 		{
-			int ind = q.back();
-			q.pop();
-			++dist;
+			int ind = q.front();
+			q.pop_front();
 			int parent = ind;
-			if (pennants[ind].dist < dist)
-				dist = pennants[ind].dist;
 			graph_traits < Graph >::adjacency_iterator ai, a_end;
 
 			for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
 			{
 				int ind = get(index_map, *ai);
 				{
-					if (pennants[ind].dist > dist + 1)
+					if (name[ind] < 0)
 					{
-						pennants[ind].dist = dist + 1;
-						pennants[ind].parent = parent;
-						q.push(ind);
+						name[ind] = parent;
+						q.push_back(ind);
 					}
 				}
 			}
@@ -265,58 +117,71 @@ struct Subgraph
 
 	void pbfs_search(int index)
 	{
-		pennants = std::vector <pennant> (num_vertices(g));
-		for (int i = 0; i < pennants.size(); ++i)
-		{
-			pennants[i].value = i;
-			pennants[i].dist = 999999999;
-			pennants[i].parent = -1;
-		}
-		pennants[index].parent = index;
-		pennants[index].dist = 0;
-		vector<bag> v;
+		//pennants = std::vector <int> (num_vertices(g), -1);
+		property_map<Graph, first_name_t>::type
+			name = get(first_name_t(), g);
+		name[index] = index;
+		vector<int> v;
 		int dist = 0;
-		v.push_back(bag(33));
-		v.back().insert(&pennants[index]);
-		while (!v[dist].empty())
+		v.push_back(index);
+		Graph* ptr = &g;
+		while (!v.empty())
 		{
-			v.push_back(bag(33));
-			process_layor(v[dist], v[dist + 1], dist);
-			++dist;
-		}
-	};
-	void process_layor(bag& in_bag, bag& out_bag, int d)
-	{
-		{
-			property_map < Graph, vertex_index_t >::type
-				index_map = get(vertex_index, g);
-			for (int i = in_bag.values.size()-1; i >= 0; --i)
+			vector<hpx::future<vector<int>>> futures;
+			futures.reserve(v.size() / grainsize + 1);
 			{
-				if (in_bag.values[i] != nullptr)
+				int i = 0;
+				for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
 				{
-					int parent = in_bag.values[i]->value;
-					int dist = d;
-					graph_traits < Graph >::adjacency_iterator ai, a_end;
-					boost::tie(ai, a_end) = adjacent_vertices(parent, g);
-
-					for (; ai != a_end; ++ai)
+					int last = i;
+					i += grainsize;
+					if (i < v.size())
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor, it, ptr, grainsize)));
+					else
 					{
-						int ind = get(index_map, *ai);
-						if (pennants[ind].dist > 99999)
-						{
-							//mutex_type::scoped_lock l(*m);
-							pennants[ind].dist = dist + 1;
-							pennants[ind].parent = parent;
-							out_bag.insert(&(pennants[ind]));
-						}
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor, it, ptr, v.size() - last)));
+						break;
 					}
 				}
 			}
-			return;
+			//hpx::wait_all(futures.begin(), futures.end());
+			vector<int> children;
+			children.reserve(v.size() * 16);
+			for (int i = 0; i < futures.size(); ++i)
+			{
+				vector<int> future = futures[i].get();
+				children.insert(children.end(), future.begin(), future.end());
+			}
+			v = children;
 		}
-		return;
 	};
 
+};
+
+vector<int> process_layor(vector<int>::iterator in_bag, Graph* g, int grainsize)
+{
+	property_map < Graph, vertex_index_t >::type
+		index_map = get(vertex_index, *g);
+	property_map<Graph, first_name_t>::type
+		name = get(first_name_t(), *g);
+	vector<int> out_bag;
+	int count = 0;
+	for (int i = 0; i < grainsize; ++i)
+	{
+		int val = *in_bag;
+		++in_bag;
+		graph_traits < Graph >::adjacency_iterator ai, a_end;
+
+		for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
+		{
+			int ind = get(index_map, *ai);
+			if (name[ind] >= 0)
+				continue;
+			name[ind] = val;
+			out_bag.push_back(ind);
+		}
+	}
+	return out_bag;
 };
 ///////////////////////////////////////////////////////////////////////////////
 int main()
@@ -374,11 +239,17 @@ int main()
 	  add_edge(edges[i].first, edges[i].second, g);
   property_map<Graph, first_name_t>::type
 	  name = get(first_name_t(), g);
+  for (int i = 0; i < num_vertices(g); ++i)
+	  name[i] = -1;
   int start = randnodes(rng);
   Subgraph sub;
   sub.g = g;
-  sub.grainsize = 32;
+  sub.grainsize = 128;
+  sub.reset();
+  hpx::util::high_resolution_timer t;
   sub.pbfs_search(start);
+  double elapsed = t.elapsed();
+  cout << elapsed << "s for parallel\n";
   vector<pair<int,int>> counts(32,pair<int,int>(-1, 0));
   for (int i = 0; i < 32; ++i)
   {
@@ -393,11 +264,15 @@ int main()
 			  break;
 		  }
 		  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-		  sample = sub.pennants[sample].parent;
+		  sample = name[sample];
 	  }
 	  //cout << endl;
   }
+  sub.reset();
+  t.restart();
   sub.bfs_search(start);
+  elapsed = t.elapsed();
+  cout << elapsed << "s for serial\n";
   for (int i = 0; i < 32; ++i)
   {
 	  int sample = counts[i].first;
@@ -411,7 +286,7 @@ int main()
 			  break;
 		  }
 		  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-		  sample = sub.pennants[sample].parent;
+		  sample = name[sample];
 	  }
 	  if (counts[i].second != count)
 		  cout << "Counts not equal! " << count << " for bfs != " << counts[i].second << " for pbfs!\n";
