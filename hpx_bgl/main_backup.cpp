@@ -5,13 +5,6 @@
 
 #include "headers.hpp"
 
-#include <hpx/include/components.hpp>
-
-using hpx::components::stub_base;
-using hpx::components::client_base;
-using hpx::components::managed_component;
-using hpx::components::managed_component_base;
-
 typedef std::pair < unsigned int, unsigned int > Edge;
 typedef std::vector<Edge> Edges;
 using namespace boost;
@@ -75,136 +68,17 @@ typedef hpx::lcos::local::spinlock mutex_type;
 
 vector<int> process_layor(vector<int>::iterator in_bag, Graph* g, int grainsize);
 
-struct GraphComponent : 
-	hpx::components::managed_component_base<GraphComponent>
-{
-	
-	void pbfs_search(int index)
-	{
-		//pennants = std::vector <int> (num_vertices(g), -1);
-		name[index] = index;
-		vector<int> v;
-		int dist = 0;
-		v.push_back(index);
-		Graph* ptr = &g;
-		while (!v.empty())
-		{
-			vector<hpx::future<vector<int>>> futures;
-			futures.reserve(v.size() / grainsize + 1);
-			{
-				int i = 0;
-				for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
-				{
-					int last = i;
-					i += grainsize;
-					if (i < v.size())
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor, it, ptr, grainsize)));
-					else
-					{
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor, it, ptr, v.size() - last)));
-						break;
-					}
-				}
-			}
-			//hpx::wait_all(futures.begin(), futures.end());
-			vector<int> children;
-			children.reserve(v.size() * edgefact);
-			for (int i = 0; i < futures.size(); ++i)
-			{
-				vector<int> future = futures[i].get();
-				children.insert(children.end(), future.begin(), future.end());
-			}
-			v = children;
-		}
-	}
-
-	void set(Edges edges, int size, int edge)
-	{
-		for (int i = 0; i < edges.size(); ++i)
-			add_edge(edges[i].first, edges[i].second, g);
-		grainsize = size;
-		edgefact = edge;
-
-		name = get(first_name_t(), g);
-		for (int i = 0; i < num_vertices(g); ++i)
-		{
-			name[i] = -1;
-		}
-	}
-	void reset()
-	{
-		for (int i = 0; i < num_vertices(g); ++i)
-		{
-			name[i] = -1;
-		}
-	}
-	int getval(int index)
-	{
-		return name[index];
-	}
-
-	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, pbfs_search, pbfs_search_action);
-	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, set, set_action);
-	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getval, getval_action);
-public:
-	property_map<Graph, first_name_t>::type
-		name;
-private:
-	Graph g;
-	int grainsize = 9999;
-	int edgefact = 16;
-};
-
-
-typedef managed_component<GraphComponent> server_type;
-HPX_REGISTER_MINIMAL_COMPONENT_FACTORY(server_type, GraphComponent);
-
-typedef GraphComponent::pbfs_search_action pbfs_search_action;
-HPX_REGISTER_ACTION_DECLARATION(pbfs_search_action);
-HPX_REGISTER_ACTION(pbfs_search_action);
-
-typedef GraphComponent::set_action set_action;
-HPX_REGISTER_ACTION_DECLARATION(set_action);
-HPX_REGISTER_ACTION(set_action);
-
-typedef GraphComponent::getval_action getval_action;
-HPX_REGISTER_ACTION_DECLARATION(getval_action);
-HPX_REGISTER_ACTION(getval_action);
-
-struct graph_manager : client_base<graph_manager, GraphComponent>
-{
-	typedef client_base<graph_manager, GraphComponent> base_type;
-
-	graph_manager(hpx::future<hpx::id_type> && id) : base_type(std::move(id)) {}
-
-	void pbfs_search(int index)
-	{
-		hpx::async<pbfs_search_action>(this->get_gid(),index).get();
-	}
-	void set(Edges edges, int grainsize, int edgefact)
-	{
-		hpx::async<set_action>(this->get_gid(), edges, grainsize, edgefact).get();
-	}
-	int getval(int index)
-	{
-		return hpx::async<getval_action>(this->get_gid(), index).get();
-	}
-	
-};
-
-
-
 struct Subgraph
 {
 	Graph g;
-	property_map<Graph, first_name_t>::type
-		name;
 	//std::vector<int> pennants;
 	int grainsize = 9999;
 	int edgefact = 16;
 	void reset()
 	{
-		name = get(first_name_t(), g);
+
+		property_map<Graph, first_name_t>::type
+			name = get(first_name_t(), g);
 		for (int i = 0; i < num_vertices(g); ++i)
 			name[i] = -1;
 	}
@@ -212,6 +86,8 @@ struct Subgraph
 	{
 		property_map < Graph, vertex_index_t >::type
 			index_map = get(vertex_index, g);
+		property_map<Graph, first_name_t>::type
+			name = get(first_name_t(), g);
 		//pennants = std::vector <int>(num_vertices(g), -1);
 		name[index] = index;
 		list<int> q;
@@ -243,6 +119,8 @@ struct Subgraph
 	void pbfs_search(int index)
 	{
 		//pennants = std::vector <int> (num_vertices(g), -1);
+		property_map<Graph, first_name_t>::type
+			name = get(first_name_t(), g);
 		name[index] = index;
 		vector<int> v;
 		int dist = 0;
@@ -360,6 +238,10 @@ int main()
   Graph g(nodes.size());
   for (int i = 0; i < edges.size(); ++i)
 	  add_edge(edges[i].first, edges[i].second, g);
+  property_map<Graph, first_name_t>::type
+	  name = get(first_name_t(), g);
+  for (int i = 0; i < num_vertices(g); ++i)
+	  name[i] = -1;
   int start = randnodes(rng);
   Subgraph sub;
   sub.g = g;
@@ -384,38 +266,10 @@ int main()
 			  break;
 		  }
 		  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-		  sample = sub.name[sample];
+		  sample = name[sample];
 	  }
 	  //cout << endl;
   }
-
-  graph_manager hw = graph_manager::create(hpx::find_here());
-  hw.set(edges, 128, ind);
-  t.restart();
-  hw.pbfs_search(start);
-  elapsed = t.elapsed();
-  cout << elapsed << "s for parallel component\n";
-
-  for (int i = 0; i < 32; ++i)
-  {
-	  int sample = counts[i].first;
-	  int count = 0;
-	  while (sample != start)
-	  {
-		  count++;
-		  if (sample == -1)
-		  {
-			  count = -1;
-			  break;
-		  }
-		  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-		  sample = hw.getval(sample);
-	  }
-	  if (counts[i].second != count)
-		  cout << "Counts not equal! " << count << " for bfs != " << counts[i].second << " for pbfs!\n";
-	  //cout << endl;
-  }
-
   sub.reset();
   t.restart();
   sub.bfs_search(start);
@@ -434,14 +288,63 @@ int main()
 			  break;
 		  }
 		  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-		  sample = sub.name[sample];
+		  sample = name[sample];
 	  }
 	  if (counts[i].second != count)
 		  cout << "Counts not equal! " << count << " for bfs != " << counts[i].second << " for pbfs!\n";
 	  //cout << endl;
   }
+  /*
+  std::get<3>(name[start]) = 0;
+  int loc = std::get<2>(name[start]);
+  
+  vector<Subgraph> subs(partitions);
+  vector<Subgraph*> neighbors(partitions);
+  vector<mutex_type> muts(partitions+1);
+  for (int j = 0; j < partitions; ++j)
+  {
+	  neighbors[j] = &subs[j];//std::make_shared<Subgraph>(std::move(subs[j]));
+  }
+  for (int j = 0; j < partitions; ++j)
+  {
+	  subs[j].g = g;
+	  subs[j].m = &muts[j];
+  }
+  hpx::util::high_resolution_timer t;
+  subs[loc].bfs_search(start);
+  double fin = t.elapsed();
+  cout << "Completed in " << fin << "s\n";
+  for (int j = 0; j < partitions; ++j)
+  {
 
+	  property_map<Graph, first_name_t>::type
+		  tname = get(first_name_t(), subs[j].g);
 
+	  for (int i = 0; i < num_vertices(g); ++i)
+	  {
+		  if (get<3>(name[i]) > get<3>(tname[i]) + 1)
+		  {
+			  get<0>(name[i]) = get<0>(tname[i]);
+			  get<3>(name[i]) = get<3>(tname[i]) + 1;
+		  }
+	  }
+  }
+  for (int i = 0; i < 32; ++i)
+  {
+	  int sample = randnodes(rng);
+	  while (sample != start)
+	  {
+		  if (sample == -1)
+		  {
+			  cout << "ERROR!";
+			  break;
+		  }
+		  cout << sample << " ";
+		  sample = get<0>(name[sample]);
+	  }
+	  cout << endl;
+  }
+  */
   int s;
   cin >> s;
 	return 0;
