@@ -214,14 +214,15 @@ struct Subgraph
 			index_map = get(vertex_index, g);
 		//pennants = std::vector <int>(num_vertices(g), -1);
 		name[index] = index;
-		list<int> q;
+		vector<int> q;
+		q.reserve(num_vertices(g));
 		q.push_back(index);
 		int dist = 0;
-
-		while (!q.empty())
+		int spot = 0;
+		while (spot < q.size())
 		{
-			int ind = q.front();
-			q.pop_front();
+			int ind = q[spot];
+			++spot;
 			int parent = ind;
 			graph_traits < Graph >::adjacency_iterator ai, a_end;
 
@@ -339,7 +340,7 @@ int main()
 	Edges edges;
 	createEdges(nodes, edges);
 
-	vector<idx_t> xadj;
+	/*vector<idx_t> xadj;
 	vector<idx_t> adjncy;
 
 	toCSR(nodes, xadj, adjncy);
@@ -356,7 +357,7 @@ int main()
 		//std::cout << "Serial execution.\n";
 		std::fill(part.begin(), part.end(), 0);
 	}
-
+	*/
   Graph g(nodes.size());
   for (int i = 0; i < edges.size(); ++i)
 	  add_edge(edges[i].first, edges[i].second, g);
@@ -367,6 +368,7 @@ int main()
   sub.edgefact = ind;
   sub.reset();
   hpx::util::high_resolution_timer t;
+  t.restart();
   sub.pbfs_search(start);
   double elapsed = t.elapsed();
   cout << elapsed << "s for parallel\n";
