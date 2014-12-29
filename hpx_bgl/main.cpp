@@ -7,12 +7,15 @@
 
 #include <hpx/include/components.hpp>
 
+#include "../generator/make_graph.h"
+#include "../generator/utils.h"
+
 using hpx::components::stub_base;
 using hpx::components::client_base;
 using hpx::components::managed_component;
 using hpx::components::managed_component_base;
 
-typedef std::pair < unsigned int, unsigned int > Edge;
+typedef std::pair < uint32_t, uint32_t > Edge;
 typedef std::vector<Edge> Edges;
 using namespace boost;
 using namespace std;
@@ -146,6 +149,7 @@ struct GraphComponent :
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, pbfs_search, pbfs_search_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, set, set_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getval, getval_action);
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, reset, reset_action);
 public:
 	property_map<Graph, first_name_t>::type
 		name;
@@ -171,6 +175,12 @@ typedef GraphComponent::getval_action getval_action;
 HPX_REGISTER_ACTION_DECLARATION(getval_action);
 HPX_REGISTER_ACTION(getval_action);
 
+
+typedef GraphComponent::reset_action reset_action;
+HPX_REGISTER_ACTION_DECLARATION(reset_action);
+HPX_REGISTER_ACTION(reset_action);
+
+
 struct graph_manager : client_base<graph_manager, GraphComponent>
 {
 	typedef client_base<graph_manager, GraphComponent> base_type;
@@ -189,9 +199,12 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	{
 		return hpx::async<getval_action>(this->get_gid(), index).get();
 	}
+	void reset()
+	{
+		hpx::async<reset_action>(this->get_gid()).get();
+	}
 	
 };
-
 
 
 struct Subgraph
@@ -229,12 +242,10 @@ struct Subgraph
 			for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
 			{
 				int ind = get(index_map, *ai);
+				if (name[ind] < 0)
 				{
-					if (name[ind] < 0)
-					{
-						name[ind] = parent;
-						q.push_back(ind);
-					}
+					name[ind] = parent;
+					q.push_back(ind);
 				}
 			}
 					
@@ -315,134 +326,151 @@ int main()
 	cout << "threads: " << hpx::get_os_thread_count() << endl;
 
 	int nnodes;
-	cout << "Enter nodes: ";
-	cin >> nnodes;
+	int scale;
+	cout << "Enter scale: ";
+	cin >> scale;
 	int ind;
 	cout << "Enter edges per node: ";
 	cin >> ind;
-
-	vector<vector<idx_t>> nodes(nnodes);
+	nnodes = pow(2, scale);
+	//
 	boost::random::mt19937 rng;
-	boost::random::uniform_int_distribution<> randnodes(0, nodes.size()-1);
-	for (int i = 0; i < nodes.size(); ++i)
-	{
-		vector<idx_t> edger;
-		for (int j = 0; j < ind; ++j)
-		{
-			int spot = randnodes(rng);
-			if (spot != i && std::find(nodes[spot].begin(), nodes[spot].end(), i) == nodes[spot].end())
-				edger.push_back(spot);
-			else
-				--j;
-		}
-		nodes[i] = edger;
-	}
+	boost::random::uniform_int_distribution<> randnodes(0, nnodes*ind);
+
+	uint64_t seed1 = 2, seed2 = 3;
+
+	uint_fast32_t seed = randnodes(rng);
+
+	make_mrg_seed(seed1, seed2, &seed);
+
 	Edges edges;
-	createEdges(nodes, edges);
-
-	/*vector<idx_t> xadj;
-	vector<idx_t> adjncy;
-
-	toCSR(nodes, xadj, adjncy);
-
-	vector<idx_t> part(xadj.size() - 1);
-	int partitions = 1;
-	//cout << endl << "Enter partitions: ";
-	//cin >> partitions;
-	if (partitions > 1)
-		get_parts(xadj, adjncy, part, partitions);
-	else
+	vector<vector<idx_t>> nodes(nnodes);;
+	vector<packed_edge> pedges(nnodes*ind) ;
+	generate_kronecker_range(&seed, scale, 0, pedges.size(), &pedges.front());
+	for (int i = 0; i < pedges.size(); ++i)
 	{
-		partitions = 1;
-		//std::cout << "Serial execution.\n";
-		std::fill(part.begin(), part.end(), 0);
+		{
+			uint32_t spot = pedges[i].v0_low;
+			if (std::find(nodes[spot].begin(), nodes[spot].end(), i) != nodes[spot].end())
+				continue;
+			nodes[spot].push_back(pedges[i].v1_low);
+		}
+		{
+			uint32_t spot = pedges[i].v1_low;
+			if (std::find(nodes[spot].begin(), nodes[spot].end(), i) != nodes[spot].end())
+				continue;
+			nodes[spot].push_back(pedges[i].v0_low);
+		}
+		{
+			if (pedges[i].v0_low == pedges[i].v1_low)
+				continue;
+		}
+		edges.push_back(Edge(pedges[i].v0_low, pedges[i].v1_low));
 	}
-	*/
-  Graph g(nodes.size());
-  for (int i = 0; i < edges.size(); ++i)
-	  add_edge(edges[i].first, edges[i].second, g);
-  int start = randnodes(rng);
-  Subgraph sub;
-  sub.g = g;
-  sub.grainsize = 128;
-  sub.edgefact = ind;
-  sub.reset();
-  hpx::util::high_resolution_timer t;
-  t.restart();
-  sub.pbfs_search(start);
-  double elapsed = t.elapsed();
-  cout << elapsed << "s for parallel\n";
-  vector<pair<int,int>> counts(32,pair<int,int>(-1, 0));
-  for (int i = 0; i < 32; ++i)
+	//createEdges(nodes, edges);
+
+	int grainsize = 128;
+
+  int start;
+  vector<pair<int, int>> counts(32, pair<int, int>(-1, 0));
   {
-	  int sample = randnodes(rng);
-	  counts[i].first = sample;
-	  while (sample != start)
+	  Graph g;
+	  for (int i = 0; i < edges.size(); ++i)
+		  add_edge(edges[i].first, edges[i].second, g);
+	  Subgraph sub;
+	  sub.g = g;
+	  sub.grainsize = grainsize;
+	  sub.edgefact = ind;
+	  randnodes = boost::random::uniform_int_distribution<>(0, num_vertices(g));
+	  start = randnodes(rng);;
+	  sub.reset();
+	  hpx::util::high_resolution_timer t;
+	  t.restart();
+	  sub.pbfs_search(start);
+	  double elapsed = t.elapsed();
+	  cout << elapsed << "s for parallel\n";
+	  for (int i = 0; i < 32; ++i)
 	  {
-		  counts[i].second++;
-		  if (sample == -1)
+		  int sample = randnodes(rng);
+		  counts[i].first = sample;
+		  while (sample != start)
 		  {
-			  counts[i].second = -1;
-			  break;
+			  counts[i].second++;
+			  if (sample == -1)
+			  {
+				  counts[i].second = -1;
+				  break;
+			  }
+			  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+			  sample = sub.name[sample];
 		  }
-		  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-		  sample = sub.name[sample];
+		  //cout << endl;
 	  }
-	  //cout << endl;
   }
-
-  graph_manager hw = graph_manager::create(hpx::find_here());
-  hw.set(edges, 128, ind);
-  t.restart();
-  hw.pbfs_search(start);
-  elapsed = t.elapsed();
-  cout << elapsed << "s for parallel component\n";
-
-  for (int i = 0; i < 32; ++i)
   {
-	  int sample = counts[i].first;
-	  int count = 0;
-	  while (sample != start)
-	  {
-		  count++;
-		  if (sample == -1)
-		  {
-			  count = -1;
-			  break;
-		  }
-		  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-		  sample = hw.getval(sample);
-	  }
-	  if (counts[i].second != count)
-		  cout << "Counts not equal! " << count << " for bfs != " << counts[i].second << " for pbfs!\n";
-	  //cout << endl;
-  }
+	  graph_manager hw = graph_manager::create(hpx::find_here());
+	  hw.set(edges, grainsize, ind);
+	  hpx::util::high_resolution_timer t;
+	  t.restart();
+	  hw.pbfs_search(start);
+	  double elapsed = t.elapsed();
+	  cout << elapsed << "s for parallel component\n";
 
-  sub.reset();
-  t.restart();
-  sub.bfs_search(start);
-  elapsed = t.elapsed();
-  cout << elapsed << "s for serial\n";
-  for (int i = 0; i < 32; ++i)
+	  for (int i = 0; i < 32; ++i)
+	  {
+		  int sample = counts[i].first;
+		  int count = 0;
+		  while (sample != start)
+		  {
+			  count++;
+			  if (sample == -1)
+			  {
+				  count = -1;
+				  break;
+			  }
+			  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+			  sample = hw.getval(sample);
+		  }
+		  if (counts[i].second != count)
+			  cout << "Counts not equal! " << count << " for bfs != " << counts[i].second << " for pbfs!\n";
+		  //cout << endl;
+	  }
+  }
   {
-	  int sample = counts[i].first;
-	  int count = 0;
-	  while (sample != start)
+	  Graph g;
+	  for (int i = 0; i < edges.size(); ++i)
+		  add_edge(edges[i].first, edges[i].second, g);
+	  Subgraph sub;
+	  sub.g = g;
+	  sub.grainsize = grainsize;
+	  sub.edgefact = ind;
+	  sub.reset();
+	  hpx::util::high_resolution_timer t;
+	  t.restart();
+	  sub.bfs_search(start);
+	  double elapsed = t.elapsed();
+	  cout << elapsed << "s for serial\n";
+	  for (int i = 0; i < 32; ++i)
 	  {
-		  count++;
-		  if (sample == -1)
+		  int sample = counts[i].first;
+		  int count = 0;
+		  while (sample != start)
 		  {
-			  count = -1;
-			  break;
+			  count++;
+			  if (sample == -1)
+			  {
+				  count = -1;
+				  break;
+			  }
+			  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+			  sample = sub.name[sample];
 		  }
-		  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-		  sample = sub.name[sample];
+		  if (counts[i].second != count)
+			  cout << "Counts not equal! " << count << " for bfs != " << counts[i].second << " for pbfs!\n";
+		  //cout << endl;
 	  }
-	  if (counts[i].second != count)
-		  cout << "Counts not equal! " << count << " for bfs != " << counts[i].second << " for pbfs!\n";
-	  //cout << endl;
-  }
 
+  }
 
   int s;
   cin >> s;
