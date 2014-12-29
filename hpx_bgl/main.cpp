@@ -516,14 +516,13 @@ int main()
 	  cout << elapsed << "s for parallel\n";
   }
   {
+	  hpx::util::high_resolution_timer t;
 	  graph_manager hw = graph_manager::create(hpx::find_here());
 	  hw.set(edges, grainsize, ind);
-	  hpx::util::high_resolution_timer t;
 	  for (int j = 0; j < counts.size(); ++j)
 	  {
 		  hw.reset();
 		  hw.pbfs_search(starts[j]);
-
 	  }
 	  double elapsed = t.elapsed();
 	  cout << elapsed << "s for parallel component\n";
