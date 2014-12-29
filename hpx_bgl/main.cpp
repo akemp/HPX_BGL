@@ -347,6 +347,7 @@ int main()
 	vector<vector<idx_t>> nodes(nnodes);;
 	vector<packed_edge> pedges(nnodes*ind) ;
 	generate_kronecker_range(&seed, scale, 0, pedges.size(), &pedges.front());
+	cout << "Kronecker range generated. Making edgelist.\n";
 	for (int i = 0; i < pedges.size(); ++i)
 	{
 		{
@@ -369,27 +370,27 @@ int main()
 	}
 	//createEdges(nodes, edges);
 
-	int grainsize = 128;
+	cout << "Edgelist generated. Running tests.\n";
 
+	int grainsize = 128;
+	
   int start;
-  vector<pair<int, int>> counts(32, pair<int, int>(-1, 0));
+  vector<pair<int, int>> counts(512, pair<int, int>(-1, 0));
   {
-	  Graph g;
-	  for (int i = 0; i < edges.size(); ++i)
-		  add_edge(edges[i].first, edges[i].second, g);
 	  Subgraph sub;
-	  sub.g = g;
+	  for (int i = 0; i < edges.size(); ++i)
+		  add_edge(edges[i].first, edges[i].second, sub.g);
 	  sub.grainsize = grainsize;
 	  sub.edgefact = ind;
-	  randnodes = boost::random::uniform_int_distribution<>(0, num_vertices(g));
-	  start = randnodes(rng);;
+	  randnodes = boost::random::uniform_int_distribution<>(0, num_vertices(sub.g)-1);
+	  start = randnodes(rng);
 	  sub.reset();
 	  hpx::util::high_resolution_timer t;
 	  t.restart();
 	  sub.pbfs_search(start);
 	  double elapsed = t.elapsed();
 	  cout << elapsed << "s for parallel\n";
-	  for (int i = 0; i < 32; ++i)
+	  for (int i = 0; i < counts.size(); ++i)
 	  {
 		  int sample = randnodes(rng);
 		  counts[i].first = sample;
@@ -416,7 +417,7 @@ int main()
 	  double elapsed = t.elapsed();
 	  cout << elapsed << "s for parallel component\n";
 
-	  for (int i = 0; i < 32; ++i)
+	  for (int i = 0; i < counts.size(); ++i)
 	  {
 		  int sample = counts[i].first;
 		  int count = 0;
@@ -437,11 +438,9 @@ int main()
 	  }
   }
   {
-	  Graph g;
-	  for (int i = 0; i < edges.size(); ++i)
-		  add_edge(edges[i].first, edges[i].second, g);
 	  Subgraph sub;
-	  sub.g = g;
+	  for (int i = 0; i < edges.size(); ++i)
+		  add_edge(edges[i].first, edges[i].second, sub.g);
 	  sub.grainsize = grainsize;
 	  sub.edgefact = ind;
 	  sub.reset();
@@ -450,7 +449,7 @@ int main()
 	  sub.bfs_search(start);
 	  double elapsed = t.elapsed();
 	  cout << elapsed << "s for serial\n";
-	  for (int i = 0; i < 32; ++i)
+	  for (int i = 0; i < counts.size(); ++i)
 	  {
 		  int sample = counts[i].first;
 		  int count = 0;
