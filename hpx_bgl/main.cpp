@@ -347,6 +347,7 @@ int main()
 	vector<vector<idx_t>> nodes(nnodes);;
 	vector<packed_edge> pedges(nnodes*ind) ;
 	generate_kronecker_range(&seed, scale, 0, pedges.size(), &pedges.front());
+	edges.reserve(pedges.size());
 	cout << "Kronecker range generated. Making edgelist.\n";
 	for (int i = 0; i < pedges.size(); ++i)
 	{
@@ -354,7 +355,7 @@ int main()
 			uint32_t spot = pedges[i].v0_low;
 			if (std::find(nodes[spot].begin(), nodes[spot].end(), i) != nodes[spot].end())
 				continue;
-			nodes[spot].push_back(pedges[i].v1_low);
+			//nodes[spot].push_back(pedges[i].v1_low);
 		}
 		{
 			uint32_t spot = pedges[i].v1_low;
@@ -366,9 +367,8 @@ int main()
 			if (pedges[i].v0_low == pedges[i].v1_low)
 				continue;
 		}
-		edges.push_back(Edge(pedges[i].v0_low, pedges[i].v1_low));
 	}
-	//createEdges(nodes, edges);
+	createEdges(nodes, edges);
 
 	cout << "Edgelist generated. Running tests.\n";
 
