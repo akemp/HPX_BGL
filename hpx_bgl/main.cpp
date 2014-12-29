@@ -374,101 +374,159 @@ int main()
 
 	int grainsize = 128;
 	
-  int start;
-  vector<pair<int, int>> counts(512, pair<int, int>(-1, 0));
+  vector<int> starts(64);
+  
+  vector<vector<pair<int, int>>> counts(64, vector<pair<int, int>>(512, pair<int, int>(-1, 0)));
+
+  cout << "Setting up serial values for testing.\n";
   {
 	  Subgraph sub;
 	  for (int i = 0; i < edges.size(); ++i)
 		  add_edge(edges[i].first, edges[i].second, sub.g);
+	  randnodes = boost::random::uniform_int_distribution<>(0, num_vertices(sub.g) - 1);
 	  sub.grainsize = grainsize;
 	  sub.edgefact = ind;
-	  randnodes = boost::random::uniform_int_distribution<>(0, num_vertices(sub.g)-1);
-	  start = randnodes(rng);
-	  sub.reset();
+	  for (int j = 0; j < counts.size(); ++j)
+	  {
+		  sub.reset();
+		  starts[j] = randnodes(rng);
+		  sub.bfs_search(starts[j]);
+			for (int i = 0; i < counts[j].size(); ++i)
+			{
+				int sample = randnodes(rng);
+				counts[j][i].first = sample;
+				int count = 0;
+				while (sample != starts[j])
+				{
+					count++;
+					if (sample == -1)
+					{
+						count = -1;
+						break;
+					}
+					//cout << sample << "-" << sub.pennants[sample].dist << " ";
+					sample = sub.name[sample];
+				}
+				counts[j][i].second = count;
+				//cout << endl;
+			}
+	  }
+  }
+  cout << "Running accuracy tests.\n";
+  {
+	  Subgraph sub;
+	  for (int i = 0; i < edges.size(); ++i)
+		  add_edge(edges[i].first, edges[i].second, sub.g);
+
+	  sub.grainsize = grainsize;
+	  sub.edgefact = ind;
+	  for (int j = 0; j < counts.size(); ++j)
+	  {
+		  sub.reset();
+		  sub.pbfs_search(starts[j]);
+		  {
+
+			  for (int i = 0; i < counts[j].size(); ++i)
+			  {
+				  int sample = counts[j][i].first;
+				  int count = 0;
+				  while (sample != starts[j])
+				  {
+					  count++;
+					  if (sample == -1)
+					  {
+						  count = -1;
+						  break;
+					  }
+					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+					  sample = sub.name[sample];
+				  }
+				  if (counts[j][i].second != count)
+					  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+				  //cout << endl;
+			  }
+		  }
+	  }
+  }
+
+  {
+	  graph_manager hw = graph_manager::create(hpx::find_here());
+	  hw.set(edges, grainsize, ind);
+	  for (int j = 0; j < counts.size(); ++j)
+	  {
+		  hw.reset();
+		  hw.pbfs_search(starts[j]);
+
+		  for (int i = 0; i < counts[j].size(); ++i)
+		  {
+			  int sample = counts[j][i].first;
+			  int count = 0;
+			  while (sample != starts[j])
+			  {
+				  count++;
+				  if (sample == -1)
+				  {
+					  count = -1;
+					  break;
+				  }
+				  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+				  sample = hw.getval(sample);
+			  }
+			  if (counts[j][i].second != count)
+				  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+			  //cout << endl;
+		  }
+
+	  }
+  }
+
+  cout << "Accuracy tests complete. Benchmarking.\n";
+  {
 	  hpx::util::high_resolution_timer t;
-	  t.restart();
-	  sub.pbfs_search(start);
+	  Subgraph sub;
+	  for (int i = 0; i < edges.size(); ++i)
+		  add_edge(edges[i].first, edges[i].second, sub.g);
+
+
+	  sub.grainsize = grainsize;
+	  sub.edgefact = ind;
+	  for (int j = 0; j < counts.size(); ++j)
+	  {
+		  sub.reset();
+		  sub.bfs_search(starts[j]);
+	  }
+	  double elapsed = t.elapsed();
+	  cout << elapsed << "s for serial\n";
+  }
+
+  {
+	  hpx::util::high_resolution_timer t;
+	  Subgraph sub;
+	  for (int i = 0; i < edges.size(); ++i)
+		  add_edge(edges[i].first, edges[i].second, sub.g);
+
+	  sub.grainsize = grainsize;
+	  sub.edgefact = ind;
+	  for (int j = 0; j < counts.size(); ++j)
+	  {
+		  sub.reset();
+		  sub.pbfs_search(starts[j]);
+	  }
 	  double elapsed = t.elapsed();
 	  cout << elapsed << "s for parallel\n";
-	  for (int i = 0; i < counts.size(); ++i)
-	  {
-		  int sample = randnodes(rng);
-		  counts[i].first = sample;
-		  while (sample != start)
-		  {
-			  counts[i].second++;
-			  if (sample == -1)
-			  {
-				  counts[i].second = -1;
-				  break;
-			  }
-			  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-			  sample = sub.name[sample];
-		  }
-		  //cout << endl;
-	  }
   }
   {
 	  graph_manager hw = graph_manager::create(hpx::find_here());
 	  hw.set(edges, grainsize, ind);
 	  hpx::util::high_resolution_timer t;
-	  t.restart();
-	  hw.pbfs_search(start);
+	  for (int j = 0; j < counts.size(); ++j)
+	  {
+		  hw.reset();
+		  hw.pbfs_search(starts[j]);
+
+	  }
 	  double elapsed = t.elapsed();
 	  cout << elapsed << "s for parallel component\n";
-
-	  for (int i = 0; i < counts.size(); ++i)
-	  {
-		  int sample = counts[i].first;
-		  int count = 0;
-		  while (sample != start)
-		  {
-			  count++;
-			  if (sample == -1)
-			  {
-				  count = -1;
-				  break;
-			  }
-			  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-			  sample = hw.getval(sample);
-		  }
-		  if (counts[i].second != count)
-			  cout << "Counts not equal! " << count << " for bfs != " << counts[i].second << " for pbfs!\n";
-		  //cout << endl;
-	  }
-  }
-  {
-	  Subgraph sub;
-	  for (int i = 0; i < edges.size(); ++i)
-		  add_edge(edges[i].first, edges[i].second, sub.g);
-	  sub.grainsize = grainsize;
-	  sub.edgefact = ind;
-	  sub.reset();
-	  hpx::util::high_resolution_timer t;
-	  t.restart();
-	  sub.bfs_search(start);
-	  double elapsed = t.elapsed();
-	  cout << elapsed << "s for serial\n";
-	  for (int i = 0; i < counts.size(); ++i)
-	  {
-		  int sample = counts[i].first;
-		  int count = 0;
-		  while (sample != start)
-		  {
-			  count++;
-			  if (sample == -1)
-			  {
-				  count = -1;
-				  break;
-			  }
-			  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-			  sample = sub.name[sample];
-		  }
-		  if (counts[i].second != count)
-			  cout << "Counts not equal! " << count << " for bfs != " << counts[i].second << " for pbfs!\n";
-		  //cout << endl;
-	  }
-
   }
 
   int s;
