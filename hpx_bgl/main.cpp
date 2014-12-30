@@ -68,7 +68,7 @@ void toCSR(const std::vector<std::vector<idx_t>>& nodes, std::vector<idx_t>& xad
 	return;
 }
 
-void createEdges(const std::vector<std::vector<idx_t>>& nodes, Edges& edges)
+void createEdges(const std::vector<std::vector<uint32_t>>& nodes, Edges& edges)
 {
 
 	for (int i = 0; i < nodes.size(); ++i)
@@ -131,8 +131,9 @@ struct GraphComponent :
 		}
 	}
 
-	void set(Edges edges, int size, int edge)
+	void set(Edges edges, int size, int edge, int nverts)
 	{
+		g = Graph(nverts);
 		for (int i = 0; i < edges.size(); ++i)
 			add_edge(edges[i].first, edges[i].second, g);
 		grainsize = size;
@@ -311,9 +312,9 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	{
 		hpx::async<pbfs_search_action>(this->get_gid(),index).get();
 	}
-	void set(Edges& edges, int grainsize, int edgefact)
+	void set(Edges& edges, int grainsize, int edgefact, int nverts)
 	{
-		hpx::async<set_action>(this->get_gid(), edges, grainsize, edgefact).get();
+		hpx::async<set_action>(this->get_gid(), edges, grainsize, edgefact, nverts).get();
 	}
 	int getval(int index)
 	{
@@ -509,36 +510,29 @@ int main()
 	boost::random::mt19937 rng;
 	boost::random::uniform_int_distribution<> randnodes(0, nnodes*ind);
 
-	uint64_t seed1 = 2, seed2 = 3;
+	uint64_t seed1 = 4, seed2 = 3;
 
-	uint_fast32_t seed = randnodes(rng);
+	uint_fast32_t seed;
 
 	make_mrg_seed(seed1, seed2, &seed);
 
 	Edges edges;
-	vector<vector<idx_t>> nodes(nnodes);;
+	vector<vector<uint32_t>> nodes(nnodes);;
 	vector<packed_edge> pedges(nnodes*ind);
 	generate_kronecker_range(&seed, scale, 0, pedges.size(), &pedges.front());
 	edges.reserve(pedges.size());
 	cout << "Kronecker range generated. Making edgelist.\n";
 	for (int i = 0; i < pedges.size(); ++i)
 	{
-		{
-			uint32_t spot = pedges[i].v0_low;
-			if (std::find(nodes[spot].begin(), nodes[spot].end(), i) != nodes[spot].end())
-				continue;
-			//nodes[spot].push_back(pedges[i].v1_low);
-		}
-		{
-			uint32_t spot = pedges[i].v1_low;
-			if (std::find(nodes[spot].begin(), nodes[spot].end(), i) != nodes[spot].end())
-				continue;
-		}
-		{
-			if (pedges[i].v0_low == pedges[i].v1_low)
-				continue;
-		}
-		nodes[pedges[i].v1_low].push_back(pedges[i].v0_low);
+		int v0 = pedges[i].v0_low;
+		int v1 = pedges[i].v1_low;
+		if (v0 == v1)
+			continue;
+		if (std::find(nodes[v0].begin(), nodes[v0].end(), v1) != nodes[v0].end())
+			continue;
+		if (std::find(nodes[v1].begin(), nodes[v1].end(), v0) != nodes[v1].end())
+			continue;
+		nodes[v0].push_back(v1);
 	}
 	cout << "Precalculation complete. Creating edges.";
 	createEdges(nodes, edges);
@@ -551,11 +545,13 @@ int main()
 	vector<vector<pair<int, int>>> counts(64, vector<pair<int, int>>(512, pair<int, int>(-1, 0)));
 
 	cout << "Setting up serial values for testing.\n";
+	int nverts;
 	{
 		Subgraph sub;
 		for (int i = 0; i < edges.size(); ++i)
 			add_edge(edges[i].first, edges[i].second, sub.g);
-		randnodes = boost::random::uniform_int_distribution<>(0, num_vertices(sub.g) - 1);
+		nverts = num_vertices(sub.g);
+		randnodes = boost::random::uniform_int_distribution<>(0, nverts-1);
 		sub.grainsize = grainsize;
 		sub.edgefact = ind;
 		for (int j = 0; j < counts.size(); ++j)
@@ -628,7 +624,7 @@ int main()
 
   {
 	  graph_manager hw = graph_manager::create(hpx::find_here());
-	  hw.set(edges, grainsize, ind);
+	  hw.set(edges, grainsize, ind, nverts);
 	  for (int j = 0; j < counts.size(); ++j)
 	  {
 		  hw.reset();
@@ -725,7 +721,7 @@ int main()
   {
 	  hpx::util::high_resolution_timer t;
 	  graph_manager hw = graph_manager::create(hpx::find_here());
-	  hw.set(edges, grainsize, ind);
+	  hw.set(edges, grainsize, ind, nverts);
 	  for (int j = 0; j < counts.size(); ++j)
 	  {
 		  hw.reset();
