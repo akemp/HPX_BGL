@@ -27,6 +27,15 @@ struct first_name_t {
 typedef boost::property<first_name_t, int> Color; //parent, color, partition, distance
 typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
 	Color> Graph;
+
+struct multi_name_t {
+	typedef boost::vertex_property_tag kind;
+};
+
+typedef boost::property<multi_name_t, vector<int> > MultiColor; //parent, color, partition, distance
+typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+	MultiColor> MultiGraph;
+
 int get_parts(std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy, std::vector<idx_t> &part,
 	idx_t nparts)
 {
@@ -77,6 +86,7 @@ typedef struct Subgraph;
 typedef hpx::lcos::local::spinlock mutex_type;
 
 vector<int> process_layor(vector<int>::iterator in_bag, Graph* g, int grainsize);
+vector<int> process_layor_multi(int loc, vector<int>::iterator in_bag, MultiGraph* g, int grainsize);
 
 struct GraphComponent : 
 	hpx::components::managed_component_base<GraphComponent>
@@ -129,10 +139,7 @@ struct GraphComponent :
 		edgefact = edge;
 
 		name = get(first_name_t(), g);
-		for (int i = 0; i < num_vertices(g); ++i)
-		{
-			name[i] = -1;
-		}
+		reset();
 	}
 	void reset()
 	{
@@ -145,16 +152,85 @@ struct GraphComponent :
 	{
 		return name[index];
 	}
+	void multireset(int starts)
+	{
+		for (int i = 0; i < num_vertices(gs); ++i)
+		{
+			names[i] = vector<int>(starts,-1);
+		}
+	}
+
+	void setmulti(Edges edges, int size, int edge, int starts)
+	{
+		for (int i = 0; i < edges.size(); ++i)
+			add_edge(edges[i].first, edges[i].second, gs);
+		grainsize = size;
+		edgefact = edge;
+
+		names = get(multi_name_t(), gs);
+		multireset(starts);
+	}
+
+	void multival(int loc, int index)
+	{
+		//pennants = std::vector <int> (num_vertices(g), -1);
+		names[index][loc] = index;
+		vector<int> v;
+		int dist = 0;
+		v.push_back(index);
+		MultiGraph* ptr = &gs;
+		while (!v.empty())
+		{
+			vector<hpx::future<vector<int>>> futures;
+			futures.reserve(v.size() / grainsize + 1);
+			{
+				int i = 0;
+				for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
+				{
+					int last = i;
+					i += grainsize;
+					if (i < v.size())
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, it, ptr, grainsize)));
+					else
+					{
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, it, ptr, v.size() - last)));
+						break;
+					}
+				}
+			}
+			//hpx::wait_all(futures.begin(), futures.end());
+			vector<int> children;
+			children.reserve(v.size() * edgefact);
+			for (int i = 0; i < futures.size(); ++i)
+			{
+				vector<int> future = futures[i].get();
+				children.insert(children.end(), future.begin(), future.end());
+			}
+			v = children;
+		}
+	}
+
+	int getmultival(int i, int index)
+	{
+		return names[index][i];
+	}
 
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, pbfs_search, pbfs_search_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, set, set_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getval, getval_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, reset, reset_action);
+
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, setmulti, setmulti_action);
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, multival, multival_action);
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getmultival, getmultival_action);
 public:
 	property_map<Graph, first_name_t>::type
 		name;
+	property_map<MultiGraph, multi_name_t>::type
+		names;
 private:
 	Graph g;
+	MultiGraph gs;
 	int grainsize = 9999;
 	int edgefact = 16;
 };
@@ -181,6 +257,20 @@ HPX_REGISTER_ACTION_DECLARATION(reset_action);
 HPX_REGISTER_ACTION(reset_action);
 
 
+typedef GraphComponent::setmulti_action setmulti_action;
+HPX_REGISTER_ACTION_DECLARATION(setmulti_action);
+HPX_REGISTER_ACTION(setmulti_action);
+
+
+typedef GraphComponent::multival_action multival_action;
+HPX_REGISTER_ACTION_DECLARATION(multival_action);
+HPX_REGISTER_ACTION(multival_action);
+
+typedef GraphComponent::getmultival_action getmultival_action;
+HPX_REGISTER_ACTION_DECLARATION(getmultival_action);
+HPX_REGISTER_ACTION(getmultival_action);
+
+
 struct graph_manager : client_base<graph_manager, GraphComponent>
 {
 	typedef client_base<graph_manager, GraphComponent> base_type;
@@ -202,6 +292,27 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	void reset()
 	{
 		hpx::async<reset_action>(this->get_gid()).get();
+	}
+	void setmulti(Edges edges, int grainsize, int edgefact, int starts)
+	{
+		//void setmulti(Edges edges, int size, int edge, int starts)
+		hpx::async<setmulti_action>(this->get_gid(), edges, grainsize, edgefact, starts).get();
+	}
+	void multival(vector<int> starts)
+	{
+
+		vector<hpx::future<void>> futures(starts.size());
+		
+		for (int i = 0; i < starts.size(); ++i)
+		{
+			futures[i] = (hpx::async<multival_action>(this->get_gid(), i,starts[i]));
+		}
+		hpx::wait_all(futures.begin(), futures.end());
+	}
+	int getmultival(int i, int index)
+	{
+
+		return hpx::async<getmultival_action>(this->get_gid(),i, index).get();
 	}
 	
 };
@@ -313,6 +424,32 @@ vector<int> process_layor(vector<int>::iterator in_bag, Graph* g, int grainsize)
 			if (name[ind] >= 0)
 				continue;
 			name[ind] = val;
+			out_bag.push_back(ind);
+		}
+	}
+	return out_bag;
+};
+
+vector<int> process_layor_multi(int loc, vector<int>::iterator in_bag, MultiGraph* g, int grainsize)
+{
+	property_map < MultiGraph, vertex_index_t >::type
+		index_map = get(vertex_index, *g);
+	property_map<MultiGraph, multi_name_t>::type
+		name = get(multi_name_t(), *g);
+	vector<int> out_bag;
+	int count = 0;
+	for (int i = 0; i < grainsize; ++i)
+	{
+		int val = *in_bag;
+		++in_bag;
+		graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
+
+		for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
+		{
+			int ind = get(index_map, *ai);
+			if (name[ind][loc] >= 0)
+				continue;
+			name[ind][loc] = val;
 			out_bag.push_back(ind);
 		}
 	}
@@ -479,6 +616,34 @@ int main()
 
 	  }
   }
+  {
+	  graph_manager hw = graph_manager::create(hpx::find_here());
+	  hw.setmulti(edges, grainsize, ind, starts.size());
+	  hw.multival(starts);
+
+	  for (int j = 0; j < counts.size(); ++j)
+	  {
+		  for (int i = 0; i < counts[j].size(); ++i)
+		  {
+			  int sample = counts[j][i].first;
+			  int count = 0;
+			  while (sample != starts[j])
+			  {
+				  count++;
+				  if (sample == -1)
+				  {
+					  count = -1;
+					  break;
+				  }
+				  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+				  sample = hw.getmultival(j, sample);
+			  }
+			  if (counts[j][i].second != count)
+				  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+			  //cout << endl;
+		  }
+	  }
+  }
 
   cout << "Accuracy tests complete. Benchmarking.\n";
   {
@@ -526,6 +691,14 @@ int main()
 	  }
 	  double elapsed = t.elapsed();
 	  cout << elapsed << "s for parallel component\n";
+  }
+  {
+	  hpx::util::high_resolution_timer t;
+	  graph_manager hw = graph_manager::create(hpx::find_here());
+	  hw.setmulti(edges, grainsize, ind, starts.size());
+	  hw.multival(starts);
+	  double elapsed = t.elapsed();
+	  cout << elapsed << "s for highly parallel component\n";
   }
 
   int s;
