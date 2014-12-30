@@ -171,7 +171,37 @@ struct GraphComponent :
 		multireset(starts);
 	}
 
-	void multival(int loc, int index)
+	void multival(vector<int> starts)
+	{
+		vector<hpx::future<void>> futures;
+		int i = 0;
+		int adder = 1;
+		for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
+		{
+			int last = i;
+			i += adder;
+			if (i < starts.size())
+			{
+				futures.push_back( hpx::async(&runMp, it, last, adder, this));
+			}
+			else
+			{
+				futures.push_back ( hpx::async(&runMp, it, last, starts.size() - last, this));
+				break;
+			}
+		}
+		hpx::wait_all(futures);
+	}
+	static void runMp(vector<int>::iterator loc, int index, int size, GraphComponent* gc)
+	{
+		for (int i = 0; i < size; ++i)
+		{
+			gc->mpbfs(index + i, *loc);
+			++loc;
+		}
+	}
+
+	void mpbfs(int loc, int index)
 	{
 		//pennants = std::vector <int> (num_vertices(g), -1);
 		names[index][loc] = index;
@@ -281,7 +311,7 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	{
 		hpx::async<pbfs_search_action>(this->get_gid(),index).get();
 	}
-	void set(Edges edges, int grainsize, int edgefact)
+	void set(Edges& edges, int grainsize, int edgefact)
 	{
 		hpx::async<set_action>(this->get_gid(), edges, grainsize, edgefact).get();
 	}
@@ -293,7 +323,7 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	{
 		hpx::async<reset_action>(this->get_gid()).get();
 	}
-	void setmulti(Edges edges, int grainsize, int edgefact, int starts)
+	void setmulti(Edges& edges, int grainsize, int edgefact, int starts)
 	{
 		//void setmulti(Edges edges, int size, int edge, int starts)
 		hpx::async<setmulti_action>(this->get_gid(), edges, grainsize, edgefact, starts).get();
@@ -301,13 +331,8 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	void multival(vector<int> starts)
 	{
 
-		vector<hpx::future<void>> futures(starts.size());
-		
-		for (int i = 0; i < starts.size(); ++i)
-		{
-			futures[i] = (hpx::async<multival_action>(this->get_gid(), i,starts[i]));
-		}
-		hpx::wait_all(futures.begin(), futures.end());
+		hpx::async<multival_action>(this->get_gid(), starts).get();
+		//hpx::wait_all(futures.begin(), futures.end());
 	}
 	int getmultival(int i, int index)
 	{
@@ -458,7 +483,7 @@ vector<int> process_layor_multi(int loc, vector<int>::iterator in_bag, MultiGrap
 ///////////////////////////////////////////////////////////////////////////////
 int main()
 {
-	
+
 	using namespace std;
 	cout << "threads: " << hpx::get_os_thread_count() << endl;
 
@@ -469,6 +494,16 @@ int main()
 	int ind;
 	cout << "Enter edges per node: ";
 	cin >> ind;
+	int grainsize;
+#ifdef CUSTOMGRAIN
+	cout << "Enter grainsize: ";
+	cin >> grainsize;
+#else
+	grainsize = 128;
+#endif
+	int acctest;
+	cout << "Run accuracy tests (1 for yes)?";
+	cin >> acctest;
 	nnodes = pow(2, scale);
 	//
 	boost::random::mt19937 rng;
@@ -482,7 +517,7 @@ int main()
 
 	Edges edges;
 	vector<vector<idx_t>> nodes(nnodes);;
-	vector<packed_edge> pedges(nnodes*ind) ;
+	vector<packed_edge> pedges(nnodes*ind);
 	generate_kronecker_range(&seed, scale, 0, pedges.size(), &pedges.front());
 	edges.reserve(pedges.size());
 	cout << "Kronecker range generated. Making edgelist.\n";
@@ -510,85 +545,86 @@ int main()
 
 	cout << "Edgelist generated. Running tests.\n";
 
-	int grainsize = 128;
-	
-  vector<int> starts(64);
-  
-  vector<vector<pair<int, int>>> counts(64, vector<pair<int, int>>(512, pair<int, int>(-1, 0)));
 
-  cout << "Setting up serial values for testing.\n";
-  {
-	  Subgraph sub;
-	  for (int i = 0; i < edges.size(); ++i)
-		  add_edge(edges[i].first, edges[i].second, sub.g);
-	  randnodes = boost::random::uniform_int_distribution<>(0, num_vertices(sub.g) - 1);
-	  sub.grainsize = grainsize;
-	  sub.edgefact = ind;
-	  for (int j = 0; j < counts.size(); ++j)
-	  {
-		  starts[j] = randnodes(rng);
-#ifdef RUNACCURACY
-		  sub.reset();
-		  sub.bfs_search(starts[j]);
-			for (int i = 0; i < counts[j].size(); ++i)
+	vector<int> starts(64);
+
+	vector<vector<pair<int, int>>> counts(64, vector<pair<int, int>>(512, pair<int, int>(-1, 0)));
+
+	cout << "Setting up serial values for testing.\n";
+	{
+		Subgraph sub;
+		for (int i = 0; i < edges.size(); ++i)
+			add_edge(edges[i].first, edges[i].second, sub.g);
+		randnodes = boost::random::uniform_int_distribution<>(0, num_vertices(sub.g) - 1);
+		sub.grainsize = grainsize;
+		sub.edgefact = ind;
+		for (int j = 0; j < counts.size(); ++j)
+		{
+			starts[j] = randnodes(rng);
+			if (acctest == 1)
 			{
-				int sample = randnodes(rng);
-				counts[j][i].first = sample;
-				int count = 0;
-				while (sample != starts[j])
+				sub.reset();
+				sub.bfs_search(starts[j]);
+				for (int i = 0; i < counts[j].size(); ++i)
 				{
-					count++;
-					if (sample == -1)
+					int sample = randnodes(rng);
+					counts[j][i].first = sample;
+					int count = 0;
+					while (sample != starts[j])
 					{
-						count = -1;
-						break;
+						count++;
+						if (sample == -1)
+						{
+							count = -1;
+							break;
+						}
+						//cout << sample << "-" << sub.pennants[sample].dist << " ";
+						sample = sub.name[sample];
 					}
-					//cout << sample << "-" << sub.pennants[sample].dist << " ";
-					sample = sub.name[sample];
+					counts[j][i].second = count;
+					//cout << endl;
 				}
-				counts[j][i].second = count;
-				//cout << endl;
 			}
-#endif
-	  }
-  }
-#ifdef RUNACCURACY
-  cout << "Running accuracy tests.\n";
-  {
-	  Subgraph sub;
-	  for (int i = 0; i < edges.size(); ++i)
-		  add_edge(edges[i].first, edges[i].second, sub.g);
+		}
+	}
+	if (acctest == 1)
+	{
+		cout << "Running accuracy tests.\n";
+		{
+			Subgraph sub;
+			for (int i = 0; i < edges.size(); ++i)
+				add_edge(edges[i].first, edges[i].second, sub.g);
 
-	  sub.grainsize = grainsize;
-	  sub.edgefact = ind;
-	  for (int j = 0; j < counts.size(); ++j)
-	  {
-		  sub.reset();
-		  sub.pbfs_search(starts[j]);
-		  {
+			sub.grainsize = grainsize;
+			sub.edgefact = ind;
+			for (int j = 0; j < counts.size(); ++j)
+			{
+				sub.reset();
+				sub.pbfs_search(starts[j]);
+				{
 
-			  for (int i = 0; i < counts[j].size(); ++i)
-			  {
-				  int sample = counts[j][i].first;
-				  int count = 0;
-				  while (sample != starts[j])
-				  {
-					  count++;
-					  if (sample == -1)
-					  {
-						  count = -1;
-						  break;
-					  }
-					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-					  sample = sub.name[sample];
-				  }
-				  if (counts[j][i].second != count)
-					  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
-				  //cout << endl;
-			  }
-		  }
-	  }
-  }
+					for (int i = 0; i < counts[j].size(); ++i)
+					{
+						int sample = counts[j][i].first;
+						int count = 0;
+						while (sample != starts[j])
+						{
+							count++;
+							if (sample == -1)
+							{
+								count = -1;
+								break;
+							}
+							//cout << sample << "-" << sub.pennants[sample].dist << " ";
+							sample = sub.name[sample];
+						}
+						if (counts[j][i].second != count)
+							cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+						//cout << endl;
+					}
+				}
+			}
+		}
 
   {
 	  graph_manager hw = graph_manager::create(hpx::find_here());
@@ -649,8 +685,8 @@ int main()
 	  }
   }
 
-  cout << "Accuracy tests complete.\n";
-#endif
+		cout << "Accuracy tests complete.\n";
+}
   cout << "Benchmarking.\n";
   {
 	  hpx::util::high_resolution_timer t;
