@@ -526,8 +526,9 @@ int main()
 	  sub.edgefact = ind;
 	  for (int j = 0; j < counts.size(); ++j)
 	  {
-		  sub.reset();
 		  starts[j] = randnodes(rng);
+#ifdef RUNACCURACY
+		  sub.reset();
 		  sub.bfs_search(starts[j]);
 			for (int i = 0; i < counts[j].size(); ++i)
 			{
@@ -548,8 +549,10 @@ int main()
 				counts[j][i].second = count;
 				//cout << endl;
 			}
+#endif
 	  }
   }
+#ifdef RUNACCURACY
   cout << "Running accuracy tests.\n";
   {
 	  Subgraph sub;
@@ -646,7 +649,9 @@ int main()
 	  }
   }
 
-  cout << "Accuracy tests complete. Benchmarking.\n";
+  cout << "Accuracy tests complete.\n";
+#endif
+  cout << "Benchmarking.\n";
   {
 	  hpx::util::high_resolution_timer t;
 	  Subgraph sub;
