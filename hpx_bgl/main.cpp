@@ -22,7 +22,7 @@ struct lock_name_t {
 	typedef boost::vertex_property_tag kind;
 };
 
-typedef boost::property<lock_name_t, pair<int, mutex_type*>> LColor; //parent, color, partition, distance
+typedef boost::property<lock_name_t, pair<int, int>> LColor; //parent, color, partition, distance
 typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
 	LColor> LockGraph;
 
@@ -67,33 +67,19 @@ void toCSR(const std::vector<std::vector<idx_t>>& nodes, std::vector<idx_t>& xad
 	return;
 }
 
-/*
-void createEdges(const vector<pair<vector<uint32_t>, mutex_type*>>& nodes, Edges& edges)
-{
-
-	for (int i = 0; i < nodes.size(); ++i)
-	{
-		for (int j = 0; j < nodes[i].first.size(); ++j)
-		{
-			edges.push_back(Edge(i, nodes[i].first[j]));
-		}
-	}
-	return;
-}*/
-
 typedef struct Subgraph;
 
 vector<int> process_layor(vector<int>::iterator in_bag, Graph* g, int grainsize);
 vector<int> process_layor_multi(int loc, vector<int>::iterator in_bag, MultiGraph* g, int grainsize);
 
-struct GraphComponent : 
+struct GraphComponent :
 	hpx::components::managed_component_base<GraphComponent>
 {
 
-	void pbfs_search(int index)
+	void pbfs_search(int index, int toggled)
 	{
-		//pennants = std::vector <int> (num_vertices(g), -1);
 		name[index].first = index;
+		name[index].second = toggled;
 		vector<int> v;
 		int dist = 0;
 		v.push_back(index);
@@ -109,10 +95,10 @@ struct GraphComponent :
 					int last = i;
 					i += grainsize;
 					if (i < v.size())
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor_component, it, ptr, grainsize)));
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_component, it, ptr, grainsize, toggled)));
 					else
 					{
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor_component, it, ptr, v.size() - last)));
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_component, it, ptr, v.size() - last, toggled)));
 						break;
 					}
 				}
@@ -129,30 +115,49 @@ struct GraphComponent :
 		}
 	}
 
-	void set(vector<vector<uint32_t>> nodes, int size, int edge, int nverts)
+	void set(const vector<vector<uint32_t>> nodes, int size, int edge, int nverts)
 	{
 		g = LockGraph(nverts);
+		grainsize = size;
+		edgefact = edge;
 		for (int i = 0; i < nodes.size(); ++i)
 		{
 			for (int j = 0; j < nodes[i].size(); ++j)
 				add_edge(i, nodes[i][j], g);
 		}
-		grainsize = size;
-		edgefact = edge;
 
 		name = get(lock_name_t(), g);
-		for (int i = 0; i < num_vertices(g); ++i)
-		{
-			name[i].second = new mutex_type;
-		}
 		reset();
+	}
+	static void parreset(LockGraph* g, int start, int size, int toggled)
+	{
+		property_map<LockGraph, lock_name_t>::type
+			name = get(lock_name_t(), *g);
+		for (int i = start; i < start + size; ++i)
+		{
+			name[i].first = -1;
+			name[i].second = toggled;
+		}
 	}
 	void reset()
 	{
-		for (int i = 0; i < num_vertices(g); ++i)
+		int adder = grainsize;
+		vector<hpx::thread> futs;
+		LockGraph* ptr = &g;
+
+		for (int i = 0; i < num_vertices(g); i += adder)
 		{
-			name[i].first = -1;
+			if (i + adder < num_vertices(g))
+			{
+				futs.push_back(hpx::thread(hpx::util::bind(&parreset, ptr, i, adder, -1)));
+			}
+			else
+			{
+				futs.push_back(hpx::thread(hpx::util::bind(&parreset, ptr, i, num_vertices(g) - i, -1)));
+			}
 		}
+		for (int i = 0; i < futs.size(); ++i)
+			futs[i].join();
 	}
 	int getval(int index)
 	{
@@ -162,7 +167,7 @@ struct GraphComponent :
 	{
 		for (int i = 0; i < num_vertices(gs); ++i)
 		{
-			names[i] = vector<int>(starts,-1);
+			names[i] = vector<int>(starts, -1);
 		}
 	}
 
@@ -191,11 +196,11 @@ struct GraphComponent :
 			i += adder;
 			if (i < starts.size())
 			{
-				futures.push_back( hpx::async(&runMp, it, last, adder, this));
+				futures.push_back(hpx::async(&runMp, it, last, adder, this));
 			}
 			else
 			{
-				futures.push_back ( hpx::async(&runMp, it, last, starts.size() - last, this));
+				futures.push_back(hpx::async(&runMp, it, last, starts.size() - last, this));
 				break;
 			}
 		}
@@ -209,27 +214,29 @@ struct GraphComponent :
 			++loc;
 		}
 	}
-
-	static vector<int> process_layor_component(vector<int>::iterator in_bag, LockGraph* g, int grainsize)
+	static vector<int> process_layor_component(vector<int>::iterator in_bag, LockGraph* g, const int grainsize, int toggled)
 	{
-		property_map < LockGraph, vertex_index_t >::type
-			index_map = get(vertex_index, *g);
-		property_map<LockGraph, lock_name_t>::type
-			name = get(lock_name_t(), *g);
 		vector<int> out_bag;
-		int count = 0;
+		out_bag.reserve(grainsize);
+
+		vector<hpx::thread> pushes;
+
+		const property_map < LockGraph, vertex_index_t >::type
+			index_map = get(vertex_index, *g);
+		const property_map<LockGraph, lock_name_t>::type
+			name = get(lock_name_t(), *g);
 		for (int i = 0; i < grainsize; ++i)
 		{
 			int val = *in_bag;
 			++in_bag;
 			graph_traits < LockGraph >::adjacency_iterator ai, a_end;
-
-			for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
+			boost::tie(ai, a_end) = adjacent_vertices(val, *g);
+			for (; ai != a_end; ++ai)
 			{
 				int ind = get(index_map, *ai);
-				//mutex_type::scoped_lock l(*name[ind].second);
-				if (name[ind].first >= 0)
+				if (name[ind].second == toggled)
 					continue;
+				name[ind].second = toggled;
 				name[ind].first = val;
 				out_bag.push_back(ind);
 			}
@@ -300,7 +307,6 @@ struct GraphComponent :
 			v = children;
 		}
 	}
-
 	int getmultival(int i, int index)
 	{
 		return names[index][i];
@@ -368,11 +374,11 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 
 	graph_manager(hpx::future<hpx::id_type> && id) : base_type(std::move(id)) {}
 
-	void pbfs_search(int index)
+	void pbfs_search(int index, int toggle)
 	{
-		hpx::async<pbfs_search_action>(this->get_gid(),index).get();
+		hpx::async<pbfs_search_action>(this->get_gid(), index, toggle).get();
 	}
-	void set(vector<vector<uint32_t>>& nodes, int grainsize, int edgefact, int nverts)
+	void set(const vector<vector<uint32_t>>& nodes, int grainsize, int edgefact, int nverts)
 	{
 		hpx::async<set_action>(this->get_gid(), nodes, grainsize, edgefact, nverts).get();
 	}
@@ -397,9 +403,9 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	int getmultival(int i, int index)
 	{
 
-		return hpx::async<getmultival_action>(this->get_gid(),i, index).get();
+		return hpx::async<getmultival_action>(this->get_gid(), i, index).get();
 	}
-	
+
 };
 
 
@@ -449,8 +455,12 @@ int main()
 #else
 	grainsize = 128;
 #endif
+	int searches;
+	cout << "How many searches?";
+	cin >> searches;
+
 	int acctest;
-	cout << "Run accuracy tests (1 for yes)?";
+	cout << "Run accuracy tests (0 for no, 1 for yes)?";
 	cin >> acctest;
 	nnodes = pow(2, scale);
 	//
@@ -500,9 +510,9 @@ int main()
 	cout << "Edgelist generated. Running tests.\n";
 
 
-	vector<int> starts(64);
+	vector<int> starts(searches);
 
-	vector<vector<pair<int, int>>> counts(64, vector<pair<int, int>>(512, pair<int, int>(-1, 0)));
+	vector<vector<pair<int, int>>> counts(starts.size(), vector<pair<int, int>>(512, pair<int, int>(-1, 0)));
 
 	cout << "Setting up serial values for testing.\n";
 	int nverts;
@@ -514,13 +524,13 @@ int main()
 				add_edge(i, nodes[i][j], sub.g);
 		}
 		nverts = num_vertices(sub.g);
-		randnodes = boost::random::uniform_int_distribution<>(0, nverts-1);
+		randnodes = boost::random::uniform_int_distribution<>(0, nverts - 1);
 		sub.grainsize = grainsize;
 		sub.edgefact = ind;
 		for (int j = 0; j < counts.size(); ++j)
 		{
 			starts[j] = randnodes(rng);
-			if (acctest == 1)
+			if (acctest != 0)
 			{
 				sub.reset();
 				sub.bfs_search(starts[j]);
@@ -546,7 +556,7 @@ int main()
 			}
 		}
 	}
-	if (acctest == 1)
+	if (acctest != 0)
 	{
 		cout << "Running accuracy tests.\n";
 		{
@@ -593,8 +603,8 @@ int main()
 	  hw.set(nodes, grainsize, ind, nverts);
 	  for (int j = 0; j < counts.size(); ++j)
 	  {
-		  hw.reset();
-		  hw.pbfs_search(starts[j]);
+		  //hw.reset();
+		  hw.pbfs_search(starts[j], j);
 
 		  for (int i = 0; i < counts[j].size(); ++i)
 		  {
@@ -648,31 +658,33 @@ int main()
   }
 
 		cout << "Accuracy tests complete.\n";
-}
-  cout << "Benchmarking.\n";
+	}
+	cout << "Benchmarking.\n";
+	{
+		hpx::util::high_resolution_timer t;
+		t.restart();
+		Subgraph sub;
+		for (int i = 0; i < nodes.size(); ++i)
+		{
+			for (int j = 0; j < nodes[i].size(); ++j)
+				add_edge(i, nodes[i][j], sub.g);
+		}
+
+
+		sub.grainsize = grainsize;
+		sub.edgefact = ind;
+		for (int j = 0; j < counts.size(); ++j)
+		{
+			sub.reset();
+			sub.bfs_search(starts[j]);
+		}
+		double elapsed = t.elapsed();
+		cout << elapsed << "s for serial\n";
+	}
+
   {
 	  hpx::util::high_resolution_timer t;
-	  Subgraph sub;
-	  for (int i = 0; i < nodes.size(); ++i)
-	  {
-		  for (int j = 0; j < nodes[i].size(); ++j)
-			  add_edge(i, nodes[i][j], sub.g);
-	  }
-
-
-	  sub.grainsize = grainsize;
-	  sub.edgefact = ind;
-	  for (int j = 0; j < counts.size(); ++j)
-	  {
-		  sub.reset();
-		  sub.bfs_search(starts[j]);
-	  }
-	  double elapsed = t.elapsed();
-	  cout << elapsed << "s for serial\n";
-  }
-
-  {
-	  hpx::util::high_resolution_timer t;
+	  t.restart();
 	  Subgraph sub;
 	  for (int i = 0; i < nodes.size(); ++i)
 	  {
@@ -691,19 +703,21 @@ int main()
 	  cout << elapsed << "s for parallel\n";
   }
   {
+
 	  hpx::util::high_resolution_timer t;
+	  t.restart();
 	  graph_manager hw = graph_manager::create(hpx::find_here());
 	  hw.set(nodes, grainsize, ind, nverts);
 	  for (int j = 0; j < counts.size(); ++j)
 	  {
-		  hw.reset();
-		  hw.pbfs_search(starts[j]);
+		  hw.pbfs_search(starts[j], j);
 	  }
 	  double elapsed = t.elapsed();
 	  cout << elapsed << "s for parallel component\n";
   }
   {
 	  hpx::util::high_resolution_timer t;
+	  t.restart();
 	  graph_manager hw = graph_manager::create(hpx::find_here());
 	  hw.setmulti(nodes, grainsize, ind, starts.size());
 	  hw.multival(starts);
@@ -711,7 +725,7 @@ int main()
 	  cout << elapsed << "s for highly parallel component\n";
   }
 
-  int s;
-  cin >> s;
+	int s;
+	cin >> s;
 	return 0;
 }

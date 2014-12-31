@@ -1,4 +1,3 @@
-
 #include <hpx/hpx_main.hpp>
 #include <hpx/include/runtime.hpp>
 #include <hpx/include/thread_executors.hpp>
@@ -17,7 +16,6 @@
 #include "../metis/include/metis.h"
 
 #include <boost/random.hpp>
-#include <boost/shared_array.hpp>
 #include <boost/format.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/breadth_first_search.hpp>
