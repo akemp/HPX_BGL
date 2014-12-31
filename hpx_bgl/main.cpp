@@ -17,16 +17,6 @@ using hpx::components::managed_component_base;
 
 typedef hpx::lcos::local::spinlock mutex_type;
 
-
-struct lock_name_t {
-	typedef boost::vertex_property_tag kind;
-};
-
-typedef boost::property<lock_name_t, pair<int, int>> LColor; //parent, color, partition, distance
-typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
-	LColor> LockGraph;
-
-
 struct multi_name_t {
 	typedef boost::vertex_property_tag kind;
 };
@@ -69,105 +59,63 @@ void toCSR(const std::vector<std::vector<idx_t>>& nodes, std::vector<idx_t>& xad
 
 typedef struct Subgraph;
 
-vector<int> process_layor(vector<int>::iterator in_bag, Graph* g, int grainsize);
-vector<int> process_layor_multi(int loc, vector<int>::iterator in_bag, MultiGraph* g, int grainsize);
-
 struct GraphComponent :
 	hpx::components::managed_component_base<GraphComponent>
 {
 
-	void pbfs_search(int index, int toggled)
+	static void parreset(MultiGraph* g, int start, int size, int toggled)
 	{
-		name[index].first = index;
-		name[index].second = toggled;
-		vector<int> v;
-		int dist = 0;
-		v.push_back(index);
-		LockGraph* ptr = &g;
-		while (!v.empty())
-		{
-			vector<hpx::future<vector<int>>> futures;
-			futures.reserve(v.size() / grainsize + 1);
-			{
-				int i = 0;
-				for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
-				{
-					int last = i;
-					i += grainsize;
-					if (i < v.size())
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor_component, it, ptr, grainsize, toggled)));
-					else
-					{
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor_component, it, ptr, v.size() - last, toggled)));
-						break;
-					}
-				}
-			}
-			//hpx::wait_all(futures.begin(), futures.end());
-			vector<int> children;
-			children.reserve(v.size() * edgefact);
-			for (int i = 0; i < futures.size(); ++i)
-			{
-				vector<int> future = futures[i].get();
-				children.insert(children.end(), future.begin(), future.end());
-			}
-			v = children;
-		}
-	}
-
-	void set(const vector<vector<uint32_t>> nodes, int size, int edge, int nverts)
-	{
-		g = LockGraph(nverts);
-		grainsize = size;
-		edgefact = edge;
-		for (int i = 0; i < nodes.size(); ++i)
-		{
-			for (int j = 0; j < nodes[i].size(); ++j)
-				add_edge(i, nodes[i][j], g);
-		}
-
-		name = get(lock_name_t(), g);
-		reset();
-	}
-	static void parreset(LockGraph* g, int start, int size, int toggled)
-	{
-		property_map<LockGraph, lock_name_t>::type
-			name = get(lock_name_t(), *g);
+		property_map<MultiGraph, multi_name_t>::type
+			name = get(multi_name_t(), *g);
 		for (int i = start; i < start + size; ++i)
 		{
-			name[i].first = -1;
-			name[i].second = toggled;
+			name[i] = vector<int>(toggled, -1);
 		}
 	}
-	void reset()
+
+	void reset(int toggled)
 	{
 		int adder = grainsize;
-		vector<hpx::thread> futs;
-		LockGraph* ptr = &g;
+
+		vector<hpx::future<void>> futs;
+		MultiGraph* ptr = &g;
 
 		for (int i = 0; i < num_vertices(g); i += adder)
 		{
 			if (i + adder < num_vertices(g))
 			{
-				futs.push_back(hpx::thread(hpx::util::bind(&parreset, ptr, i, adder, -1)));
+				futs.push_back(hpx::async(&parreset, ptr, i, adder, toggled));
 			}
 			else
 			{
-				futs.push_back(hpx::thread(hpx::util::bind(&parreset, ptr, i, num_vertices(g) - i, -1)));
+				futs.push_back(hpx::async(&parreset, ptr, i, num_vertices(g) - i, toggled));
 			}
 		}
-		for (int i = 0; i < futs.size(); ++i)
-			futs[i].join();
+		hpx::wait_all(futs);
+
 	}
-	int getval(int index)
+	void set(vector<vector<uint32_t>> nodes, int size, int edge, int starts)
 	{
-		return name[index].first;
+		for (int i = 0; i < nodes.size(); ++i)
+		{
+			for (int j = 0; j < nodes[i].size(); ++j)
+				add_edge(i, nodes[i][j], g);
+		}
+		grainsize = size;
+		edgefact = edge;
+
+		name = get(multi_name_t(), g);
+		multireset(starts);
+	}
+	int getval(int i, int index)
+	{
+		return name[i][index];
 	}
 	void multireset(int starts)
 	{
-		for (int i = 0; i < num_vertices(gs); ++i)
+		for (int i = 0; i < num_vertices(g); ++i)
 		{
-			names[i] = vector<int>(starts, -1);
+			name[i] = vector<int>(starts, -1);
 		}
 	}
 
@@ -176,35 +124,45 @@ struct GraphComponent :
 		for (int i = 0; i < nodes.size(); ++i)
 		{
 			for (int j = 0; j < nodes[i].size(); ++j)
-				add_edge(i, nodes[i][j], gs);
+				add_edge(i, nodes[i][j], g);
 		}
 		grainsize = size;
 		edgefact = edge;
 
-		names = get(multi_name_t(), gs);
+		name = get(multi_name_t(), g);
 		multireset(starts);
 	}
 
-	void multival(vector<int> starts)
+	void multival(vector<int> starts, bool sequential)
 	{
-		vector<hpx::future<void>> futures;
-		int i = 0;
-		int adder = 1;
-		for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
+		if (!sequential)
 		{
-			int last = i;
-			i += adder;
-			if (i < starts.size())
+			vector<hpx::future<void>> futures;
+			int i = 0;
+			int adder = 1;
+			for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
 			{
-				futures.push_back(hpx::async(&runMp, it, last, adder, this));
+				int last = i;
+				i += adder;
+				if (i < starts.size())
+				{
+					futures.push_back(hpx::async(&runMp, it, last, adder, this));
+				}
+				else
+				{
+					futures.push_back(hpx::async(&runMp, it, last, starts.size() - last, this));
+					break;
+				}
 			}
-			else
+			hpx::wait_all(futures);
+		}
+		else
+		{
+			for (int i = 0; i < starts.size(); ++i)
 			{
-				futures.push_back(hpx::async(&runMp, it, last, starts.size() - last, this));
-				break;
+				mpbfs(i, starts[i]);
 			}
 		}
-		hpx::wait_all(futures);
 	}
 	static void runMp(vector<int>::iterator loc, int index, int size, GraphComponent* gc)
 	{
@@ -214,36 +172,6 @@ struct GraphComponent :
 			++loc;
 		}
 	}
-	static vector<int> process_layor_component(vector<int>::iterator in_bag, LockGraph* g, const int grainsize, int toggled)
-	{
-		vector<int> out_bag;
-		out_bag.reserve(grainsize);
-
-		vector<hpx::thread> pushes;
-
-		const property_map < LockGraph, vertex_index_t >::type
-			index_map = get(vertex_index, *g);
-		const property_map<LockGraph, lock_name_t>::type
-			name = get(lock_name_t(), *g);
-		for (int i = 0; i < grainsize; ++i)
-		{
-			int val = *in_bag;
-			++in_bag;
-			graph_traits < LockGraph >::adjacency_iterator ai, a_end;
-			boost::tie(ai, a_end) = adjacent_vertices(val, *g);
-			for (; ai != a_end; ++ai)
-			{
-				int ind = get(index_map, *ai);
-				if (name[ind].second == toggled)
-					continue;
-				name[ind].second = toggled;
-				name[ind].first = val;
-				out_bag.push_back(ind);
-			}
-		}
-		return out_bag;
-	}
-
 	static vector<int> process_layor_multi(int loc, vector<int>::iterator in_bag, MultiGraph* g, int grainsize)
 	{
 		property_map < MultiGraph, vertex_index_t >::type
@@ -272,11 +200,11 @@ struct GraphComponent :
 	void mpbfs(int loc, int index)
 	{
 		//pennants = std::vector <int> (num_vertices(g), -1);
-		names[index][loc] = index;
+		name[index][loc] = index;
 		vector<int> v;
 		int dist = 0;
 		v.push_back(index);
-		MultiGraph* ptr = &gs;
+		MultiGraph* ptr = &g;
 		while (!v.empty())
 		{
 			vector<hpx::future<vector<int>>> futures;
@@ -298,7 +226,6 @@ struct GraphComponent :
 			}
 			//hpx::wait_all(futures.begin(), futures.end());
 			vector<int> children;
-			children.reserve(v.size() * edgefact);
 			for (int i = 0; i < futures.size(); ++i)
 			{
 				vector<int> future = futures[i].get();
@@ -307,38 +234,30 @@ struct GraphComponent :
 			v = children;
 		}
 	}
-	int getmultival(int i, int index)
+	int getmultival(int index, int i)
 	{
-		return names[index][i];
+		return name[index][i];
 	}
 
-	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, pbfs_search, pbfs_search_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, set, set_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getval, getval_action);
-	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, reset, reset_action);
 
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, setmulti, setmulti_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, multival, multival_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getmultival, getmultival_action);
 public:
-	property_map<LockGraph, lock_name_t>::type
-		name;
 	property_map<MultiGraph, multi_name_t>::type
-		names;
+		name;
 private:
-	LockGraph g;
-	MultiGraph gs;
+	MultiGraph g;
 	int grainsize = 9999;
 	int edgefact = 16;
+	bool active = false;
 };
 
 
 typedef managed_component<GraphComponent> server_type;
 HPX_REGISTER_MINIMAL_COMPONENT_FACTORY(server_type, GraphComponent);
-
-typedef GraphComponent::pbfs_search_action pbfs_search_action;
-HPX_REGISTER_ACTION_DECLARATION(pbfs_search_action);
-HPX_REGISTER_ACTION(pbfs_search_action);
 
 typedef GraphComponent::set_action set_action;
 HPX_REGISTER_ACTION_DECLARATION(set_action);
@@ -347,12 +266,6 @@ HPX_REGISTER_ACTION(set_action);
 typedef GraphComponent::getval_action getval_action;
 HPX_REGISTER_ACTION_DECLARATION(getval_action);
 HPX_REGISTER_ACTION(getval_action);
-
-
-typedef GraphComponent::reset_action reset_action;
-HPX_REGISTER_ACTION_DECLARATION(reset_action);
-HPX_REGISTER_ACTION(reset_action);
-
 
 typedef GraphComponent::setmulti_action setmulti_action;
 HPX_REGISTER_ACTION_DECLARATION(setmulti_action);
@@ -374,21 +287,17 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 
 	graph_manager(hpx::future<hpx::id_type> && id) : base_type(std::move(id)) {}
 
-	void pbfs_search(int index, int toggle)
+	void pbfs_search(vector<int >index)
 	{
-		hpx::async<pbfs_search_action>(this->get_gid(), index, toggle).get();
+		hpx::async<multival_action>(this->get_gid(), index, true).get();
 	}
-	void set(const vector<vector<uint32_t>>& nodes, int grainsize, int edgefact, int nverts)
+	void set(vector<vector<uint32_t>>& edges, int grainsize, int edgefact, int starts)
 	{
-		hpx::async<set_action>(this->get_gid(), nodes, grainsize, edgefact, nverts).get();
+		hpx::async<set_action>(this->get_gid(), edges, grainsize, edgefact, starts).get();
 	}
-	int getval(int index)
+	int getval(int index, int i)
 	{
-		return hpx::async<getval_action>(this->get_gid(), index).get();
-	}
-	void reset()
-	{
-		hpx::async<reset_action>(this->get_gid()).get();
+		return hpx::async<getmultival_action>(this->get_gid(), index, i).get();
 	}
 	void setmulti(vector<vector<uint32_t>>& edges, int grainsize, int edgefact, int starts)
 	{
@@ -397,13 +306,12 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	void multival(vector<int> starts)
 	{
 
-		hpx::async<multival_action>(this->get_gid(), starts).get();
-		//hpx::wait_all(futures.begin(), futures.end());
+		hpx::async<multival_action>(this->get_gid(), starts, false).get();
 	}
-	int getmultival(int i, int index)
+	int getmultival(int index, int i)
 	{
 
-		return hpx::async<getmultival_action>(this->get_gid(), i, index).get();
+		return hpx::async<getmultival_action>(this->get_gid(), index, i).get();
 	}
 
 };
@@ -443,7 +351,7 @@ int main()
 
 	int nnodes;
 	int scale;
-	cout << "Enter scale: ";
+	cout << "Enter scale (nodes=2^input): ";
 	cin >> scale;
 	int ind;
 	cout << "Enter edges per node: ";
@@ -455,13 +363,13 @@ int main()
 #else
 	grainsize = 128;
 #endif
-	int searches;
-	cout << "How many searches?";
-	cin >> searches;
 
-	int acctest;
-	cout << "Run accuracy tests (0 for no, 1 for yes)?";
-	cin >> acctest;
+	int searches;
+	cout << "Enter searches: ";
+	cin >> searches;
+	int acctest = 1;
+	//cout << "Run accuracy tests (0 for no, 1 for yes)?";
+	//cin >> acctest;
 	nnodes = pow(2, scale);
 	//
 	boost::random::mt19937 rng;
@@ -512,9 +420,12 @@ int main()
 
 	vector<int> starts(searches);
 
-	vector<vector<pair<int, int>>> counts(starts.size(), vector<pair<int, int>>(512, pair<int, int>(-1, 0)));
-
-	cout << "Setting up serial values for testing.\n";
+	vector<vector<pair<int, int>>> counts;
+	if (acctest != 0)
+	{
+		cout << "Setting up serial values for testing.\n";
+		counts = vector<vector<pair<int, int>>>(starts.size(), vector<pair<int, int>>(64, pair<int, int>(-1, 0)));
+	}
 	int nverts;
 	{
 		Subgraph sub;
@@ -527,7 +438,7 @@ int main()
 		randnodes = boost::random::uniform_int_distribution<>(0, nverts - 1);
 		sub.grainsize = grainsize;
 		sub.edgefact = ind;
-		for (int j = 0; j < counts.size(); ++j)
+		for (int j = 0; j < starts.size(); ++j)
 		{
 			starts[j] = randnodes(rng);
 			if (acctest != 0)
@@ -559,107 +470,84 @@ int main()
 	if (acctest != 0)
 	{
 		cout << "Running accuracy tests.\n";
+		
+
 		{
-			Subgraph sub;
-			for (int i = 0; i < nodes.size(); ++i)
-			{
-				for (int j = 0; j < nodes[i].size(); ++j)
-					add_edge(i, nodes[i][j], sub.g);
-			}
-
-			sub.grainsize = grainsize;
-			sub.edgefact = ind;
-			for (int j = 0; j < counts.size(); ++j)
-			{
-				sub.reset();
-				sub.pbfs_search(starts[j]);
-				{
-
-					for (int i = 0; i < counts[j].size(); ++i)
-					{
-						int sample = counts[j][i].first;
-						int count = 0;
-						while (sample != starts[j])
-						{
-							count++;
-							if (sample == -1)
-							{
-								count = -1;
-								break;
-							}
-							//cout << sample << "-" << sub.pennants[sample].dist << " ";
-							sample = sub.name[sample];
-						}
-						if (counts[j][i].second != count)
-							cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
-						//cout << endl;
-					}
-				}
-			}
-		}
-
-  {
-	  graph_manager hw = graph_manager::create(hpx::find_here());
-	  hw.set(nodes, grainsize, ind, nverts);
-	  for (int j = 0; j < counts.size(); ++j)
-	  {
-		  //hw.reset();
-		  hw.pbfs_search(starts[j], j);
-
-		  for (int i = 0; i < counts[j].size(); ++i)
+			hpx::util::high_resolution_timer t;
+			t.restart();
+		  graph_manager hw = graph_manager::create(hpx::find_here());
+		  hw.set(nodes, grainsize, ind, starts.size());
+		  hpx::util::high_resolution_timer t1;
+		  hw.pbfs_search(starts);
+		  double elapsed = t.elapsed();
+		  double elapsed1 = t1.elapsed();
+		  cout << elapsed << "s for parallel component\n";
+		  cout << elapsed1 << "s search time for parallel component\n";
+		  for (int j = 0; j < starts.size(); ++j)
 		  {
-			  int sample = counts[j][i].first;
-			  int count = 0;
-			  while (sample != starts[j])
+		  
+			  for (int i = 0; i < counts[j].size(); ++i)
 			  {
-				  count++;
-				  if (sample == -1)
+				  int sample = counts[j][i].first;
+				  int count = 0;
+				  while (sample != starts[j])
 				  {
-					  count = -1;
-					  break;
+					  count++;
+					  if (sample == -1)
+					  {
+						  count = -1;
+						  break;
+					  }
+					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+					  sample = hw.getval(sample,j);
 				  }
-				  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-				  sample = hw.getval(sample);
+				  if (counts[j][i].second != count)
+					  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+				  //cout << endl;
 			  }
-			  if (counts[j][i].second != count)
-				  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
-			  //cout << endl;
-		  }
 
-	  }
-  }
-  {
-	  graph_manager hw = graph_manager::create(hpx::find_here());
-	  hw.setmulti(nodes, grainsize, ind, starts.size());
-	  hw.multival(starts);
-
-	  for (int j = 0; j < counts.size(); ++j)
-	  {
-		  for (int i = 0; i < counts[j].size(); ++i)
-		  {
-			  int sample = counts[j][i].first;
-			  int count = 0;
-			  while (sample != starts[j])
-			  {
-				  count++;
-				  if (sample == -1)
-				  {
-					  count = -1;
-					  break;
-				  }
-				  //cout << sample << "-" << sub.pennants[sample].dist << " ";
-				  sample = hw.getmultival(j, sample);
-			  }
-			  if (counts[j][i].second != count)
-				  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
-			  //cout << endl;
 		  }
 	  }
-  }
+	  {
+		  hpx::util::high_resolution_timer t;
+		  t.restart();
+		  graph_manager hw = graph_manager::create(hpx::find_here());
+		  hw.setmulti(nodes, grainsize, ind, starts.size());
+		  hpx::util::high_resolution_timer t1;
+		  hw.multival(starts);
+
+		  double elapsed1 = t1.elapsed();
+		  double elapsed = t.elapsed();
+		  cout << elapsed << "s for highly parallel\n";
+		  cout << elapsed1 << "s search time for highly parallel\n";
+
+		  for (int j = 0; j < starts.size(); ++j)
+		  {
+			  for (int i = 0; i < counts[j].size(); ++i)
+			  {
+				  int sample = counts[j][i].first;
+				  int count = 0;
+				  while (sample != starts[j])
+				  {
+					  count++;
+					  if (sample == -1)
+					  {
+						  count = -1;
+						  break;
+					  }
+					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+					  sample = hw.getmultival(sample, j);
+				  }
+				  if (counts[j][i].second != count)
+					  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+				  //cout << endl;
+			  }
+		  }
+	  }
 
 		cout << "Accuracy tests complete.\n";
 	}
-	cout << "Benchmarking.\n";
+	cout << "Serial comparison:\n";
 	{
 		hpx::util::high_resolution_timer t;
 		t.restart();
@@ -674,7 +562,7 @@ int main()
 		sub.grainsize = grainsize;
 		sub.edgefact = ind;
 		hpx::util::high_resolution_timer t1;
-		for (int j = 0; j < counts.size(); ++j)
+		for (int j = 0; j < starts.size(); ++j)
 		{
 			sub.reset();
 			sub.bfs_search(starts[j]);
@@ -684,58 +572,6 @@ int main()
 		cout << elapsed << "s for serial\n";
 		cout << elapsed1 << "s search time for serial\n";
 	}
-
-  {
-	  hpx::util::high_resolution_timer t;
-	  t.restart();
-	  Subgraph sub;
-	  for (int i = 0; i < nodes.size(); ++i)
-	  {
-		  for (int j = 0; j < nodes[i].size(); ++j)
-			  add_edge(i, nodes[i][j], sub.g);
-	  }
-
-	  sub.grainsize = grainsize;
-	  sub.edgefact = ind;
-	  hpx::util::high_resolution_timer t1;
-	  for (int j = 0; j < counts.size(); ++j)
-	  {
-		  sub.reset();
-		  sub.pbfs_search(starts[j]);
-	  }
-	  double elapsed = t.elapsed();
-	  double elapsed1 = t1.elapsed();
-	  cout << elapsed << "s for parallel\n";
-	  cout << elapsed1 << "s search time for parallel\n";
-  }
-  {
-
-	  hpx::util::high_resolution_timer t;
-	  t.restart();
-	  graph_manager hw = graph_manager::create(hpx::find_here());
-	  hw.set(nodes, grainsize, ind, nverts);
-	  hpx::util::high_resolution_timer t1;
-	  for (int j = 0; j < counts.size(); ++j)
-	  {
-		  hw.pbfs_search(starts[j], j);
-	  }
-	  double elapsed = t.elapsed();
-	  double elapsed1 = t1.elapsed();
-	  cout << elapsed << "s for parallel component\n";
-	  cout << elapsed1 << "s search time for parallel component\n";
-  }
-  {
-	  hpx::util::high_resolution_timer t;
-	  t.restart();
-	  graph_manager hw = graph_manager::create(hpx::find_here());
-	  hw.setmulti(nodes, grainsize, ind, starts.size());
-	  hpx::util::high_resolution_timer t1;
-	  hw.multival(starts);
-	  double elapsed = t.elapsed();
-	  double elapsed1 = t1.elapsed();
-	  cout << elapsed << "s for highly parallel component\n";
-	  cout << elapsed1 << "s search time for highly parallel component\n";
-  }
 
 	int s;
 	cin >> s;
