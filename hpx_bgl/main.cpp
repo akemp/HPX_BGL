@@ -673,13 +673,16 @@ int main()
 
 		sub.grainsize = grainsize;
 		sub.edgefact = ind;
+		hpx::util::high_resolution_timer t1;
 		for (int j = 0; j < counts.size(); ++j)
 		{
 			sub.reset();
 			sub.bfs_search(starts[j]);
 		}
 		double elapsed = t.elapsed();
+		double elapsed1 = t1.elapsed();
 		cout << elapsed << "s for serial\n";
+		cout << elapsed1 << "s search time for serial\n";
 	}
 
   {
@@ -694,13 +697,16 @@ int main()
 
 	  sub.grainsize = grainsize;
 	  sub.edgefact = ind;
+	  hpx::util::high_resolution_timer t1;
 	  for (int j = 0; j < counts.size(); ++j)
 	  {
 		  sub.reset();
 		  sub.pbfs_search(starts[j]);
 	  }
 	  double elapsed = t.elapsed();
+	  double elapsed1 = t1.elapsed();
 	  cout << elapsed << "s for parallel\n";
+	  cout << elapsed1 << "s search time for parallel\n";
   }
   {
 
@@ -708,21 +714,27 @@ int main()
 	  t.restart();
 	  graph_manager hw = graph_manager::create(hpx::find_here());
 	  hw.set(nodes, grainsize, ind, nverts);
+	  hpx::util::high_resolution_timer t1;
 	  for (int j = 0; j < counts.size(); ++j)
 	  {
 		  hw.pbfs_search(starts[j], j);
 	  }
 	  double elapsed = t.elapsed();
+	  double elapsed1 = t1.elapsed();
 	  cout << elapsed << "s for parallel component\n";
+	  cout << elapsed1 << "s search time for parallel component\n";
   }
   {
 	  hpx::util::high_resolution_timer t;
 	  t.restart();
 	  graph_manager hw = graph_manager::create(hpx::find_here());
 	  hw.setmulti(nodes, grainsize, ind, starts.size());
+	  hpx::util::high_resolution_timer t1;
 	  hw.multival(starts);
 	  double elapsed = t.elapsed();
+	  double elapsed1 = t1.elapsed();
 	  cout << elapsed << "s for highly parallel component\n";
+	  cout << elapsed1 << "s search time for highly parallel component\n";
   }
 
 	int s;
