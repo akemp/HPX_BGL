@@ -13,7 +13,6 @@
 #include "splittable_mrg.h"
 
 #ifndef mrg_transition_matrix
-
 typedef struct mrg_transition_matrix {
 	uint_fast32_t s, t, u, v, w;
 	/* Cache for other parts of matrix (see mrg_update_cache function)     */
