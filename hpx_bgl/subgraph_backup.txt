@@ -1,0 +1,119 @@
+
+struct first_name_t {
+	typedef boost::vertex_property_tag kind;
+};
+
+typedef boost::property<first_name_t, int> Color; //parent, color, partition, distance
+typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+	Color> Graph;
+
+struct Subgraph
+{
+	Graph g;
+	property_map<Graph, first_name_t>::type
+		name;
+	//std::vector<int> pennants;
+	int grainsize = 9999;
+	int edgefact = 16;
+	void reset()
+	{
+		name = get(first_name_t(), g);
+		for (int i = 0; i < num_vertices(g); ++i)
+			name[i] = -1;
+	}
+	void bfs_search(int index)
+	{
+		property_map < Graph, vertex_index_t >::type
+			index_map = get(vertex_index, g);
+		//pennants = std::vector <int>(num_vertices(g), -1);
+		name[index] = index;
+		vector<int> q;
+		q.reserve(num_vertices(g));
+		q.push_back(index);
+		int dist = 0;
+		int spot = 0;
+		while (spot < q.size())
+		{
+			int ind = q[spot];
+			++spot;
+			int parent = ind;
+			graph_traits < Graph >::adjacency_iterator ai, a_end;
+
+			for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
+			{
+				int ind = get(index_map, *ai);
+				if (name[ind] < 0)
+				{
+					name[ind] = parent;
+					q.push_back(ind);
+				}
+			}
+
+		}
+	};
+
+	void pbfs_search(int index)
+	{
+		//pennants = std::vector <int> (num_vertices(g), -1);
+		name[index] = index;
+		vector<int> v;
+		int dist = 0;
+		v.push_back(index);
+		Graph* ptr = &g;
+		while (!v.empty())
+		{
+			vector<hpx::future<vector<int>>> futures;
+			futures.reserve(v.size() / grainsize + 1);
+			{
+				int i = 0;
+				for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
+				{
+					int last = i;
+					i += grainsize;
+					if (i < v.size())
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor, it, ptr, grainsize)));
+					else
+					{
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor, it, ptr, v.size() - last)));
+						break;
+					}
+				}
+			}
+			//hpx::wait_all(futures.begin(), futures.end());
+			vector<int> children;
+			children.reserve(v.size() * edgefact);
+			for (int i = 0; i < futures.size(); ++i)
+			{
+				vector<int> future = futures[i].get();
+				children.insert(children.end(), future.begin(), future.end());
+			}
+			v = children;
+		}
+	};
+
+	static vector<int> process_layor(vector<int>::iterator in_bag, Graph* g, int grainsize)
+	{
+		property_map < Graph, vertex_index_t >::type
+			index_map = get(vertex_index, *g);
+		property_map<Graph, first_name_t>::type
+			name = get(first_name_t(), *g);
+		vector<int> out_bag;
+		int count = 0;
+		for (int i = 0; i < grainsize; ++i)
+		{
+			int val = *in_bag;
+			++in_bag;
+			graph_traits < Graph >::adjacency_iterator ai, a_end;
+
+			for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
+			{
+				int ind = get(index_map, *ai);
+				if (name[ind] >= 0)
+					continue;
+				name[ind] = val;
+				out_bag.push_back(ind);
+			}
+		}
+		return out_bag;
+	};
+};

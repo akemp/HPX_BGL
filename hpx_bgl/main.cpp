@@ -160,7 +160,7 @@ struct GraphComponent :
 		{
 			for (int i = 0; i < starts.size(); ++i)
 			{
-				mpbfs(i, starts[i]);
+				mpbfs(starts[i], i);
 			}
 		}
 	}
@@ -168,7 +168,7 @@ struct GraphComponent :
 	{
 		for (int i = 0; i < size; ++i)
 		{
-			gc->mpbfs(index + i, *loc);
+			gc->mpbfs(*loc, index + i);
 			++loc;
 		}
 	}
@@ -197,7 +197,7 @@ struct GraphComponent :
 		}
 		return out_bag;
 	}
-	void mpbfs(int loc, int index)
+	void mpbfs(int index, int loc)
 	{
 		//pennants = std::vector <int> (num_vertices(g), -1);
 		name[index][loc] = index;
@@ -239,12 +239,61 @@ struct GraphComponent :
 		return name[index][i];
 	}
 
+	void bfs_search_act(vector<int> starts)
+	{
+
+		for (int i = 0; i < starts.size(); ++i)
+		{
+			bfs_search(starts[i], i);
+		}
+	}
+
+	void bfs_search(int index, int loc)
+	{
+		property_map < MultiGraph, vertex_index_t >::type
+			index_map = get(vertex_index, g);
+		//pennants = std::vector <int>(num_vertices(g), -1);
+		name[index][loc] = index;
+		vector<int> q;
+		q.reserve(num_vertices(g));
+		q.push_back(index);
+		int dist = 0;
+		int spot = 0;
+		while (spot < q.size())
+		{
+			int ind = q[spot];
+			++spot;
+			int parent = ind;
+			graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
+
+			for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
+			{
+				int ind = get(index_map, *ai);
+				if (name[ind][loc] < 0)
+				{
+					name[ind][loc] = parent;
+					q.push_back(ind);
+				}
+			}
+
+		}
+	};
+
+	int getnum()
+	{
+		return num_vertices(g);
+	}
+
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, set, set_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getval, getval_action);
 
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, setmulti, setmulti_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, multival, multival_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getmultival, getmultival_action);
+
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, bfs_search_act, bfs_search_action);
+
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getnum, num_vertices_action);
 public:
 	property_map<MultiGraph, multi_name_t>::type
 		name;
@@ -280,6 +329,13 @@ typedef GraphComponent::getmultival_action getmultival_action;
 HPX_REGISTER_ACTION_DECLARATION(getmultival_action);
 HPX_REGISTER_ACTION(getmultival_action);
 
+typedef GraphComponent::bfs_search_action bfs_search_action;
+HPX_REGISTER_ACTION_DECLARATION(bfs_search_action);
+HPX_REGISTER_ACTION(bfs_search_action);
+
+typedef GraphComponent::num_vertices_action num_vertices_action;
+HPX_REGISTER_ACTION_DECLARATION(num_vertices_action);
+HPX_REGISTER_ACTION(num_vertices_action);
 
 struct graph_manager : client_base<graph_manager, GraphComponent>
 {
@@ -305,13 +361,22 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	}
 	void multival(vector<int> starts)
 	{
-
 		hpx::async<multival_action>(this->get_gid(), starts, false).get();
+	}
+
+	void bfs_search(vector<int> starts)
+	{
+		hpx::async<bfs_search_action>(this->get_gid(), starts).get();
 	}
 	int getmultival(int index, int i)
 	{
 
 		return hpx::async<getmultival_action>(this->get_gid(), index, i).get();
+	}
+	int getnum()
+	{
+
+		return hpx::async<num_vertices_action>(this->get_gid()).get();
 	}
 
 };
@@ -428,23 +493,21 @@ int main()
 	}
 	int nverts;
 	{
-		Subgraph sub;
-		for (int i = 0; i < nodes.size(); ++i)
-		{
-			for (int j = 0; j < nodes[i].size(); ++j)
-				add_edge(i, nodes[i][j], sub.g);
-		}
-		nverts = num_vertices(sub.g);
+		graph_manager hw = graph_manager::create(hpx::find_here());
+		hw.setmulti(nodes, grainsize, ind, starts.size());
+		nverts = hw.getnum();
 		randnodes = boost::random::uniform_int_distribution<>(0, nverts - 1);
-		sub.grainsize = grainsize;
-		sub.edgefact = ind;
 		for (int j = 0; j < starts.size(); ++j)
 		{
 			starts[j] = randnodes(rng);
+		}
+		hw.bfs_search(starts);
+		for (int j = 0; j < starts.size(); ++j)
+		{
 			if (acctest != 0)
 			{
-				sub.reset();
-				sub.bfs_search(starts[j]);
+				//sub.reset();
+				//sub.bfs_search(starts[j]);
 				for (int i = 0; i < counts[j].size(); ++i)
 				{
 					int sample = randnodes(rng);
@@ -459,7 +522,7 @@ int main()
 							break;
 						}
 						//cout << sample << "-" << sub.pennants[sample].dist << " ";
-						sample = sub.name[sample];
+						sample = hw.getmultival(sample, j);
 					}
 					counts[j][i].second = count;
 					//cout << endl;
@@ -551,21 +614,12 @@ int main()
 	{
 		hpx::util::high_resolution_timer t;
 		t.restart();
-		Subgraph sub;
-		for (int i = 0; i < nodes.size(); ++i)
-		{
-			for (int j = 0; j < nodes[i].size(); ++j)
-				add_edge(i, nodes[i][j], sub.g);
-		}
+		graph_manager hw = graph_manager::create(hpx::find_here());
+		hw.setmulti(nodes, grainsize, ind, starts.size());
 
-
-		sub.grainsize = grainsize;
-		sub.edgefact = ind;
 		hpx::util::high_resolution_timer t1;
-		for (int j = 0; j < starts.size(); ++j)
 		{
-			sub.reset();
-			sub.bfs_search(starts[j]);
+			hw.bfs_search(starts);
 		}
 		double elapsed = t.elapsed();
 		double elapsed1 = t1.elapsed();
