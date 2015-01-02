@@ -132,7 +132,7 @@ struct GraphComponent :
 			++loc;
 		}
 	}
-	static vector<int> process_layor_multi(int loc, vector<int>::iterator in_bag, MultiGraph* g, int grainsize)
+	static vector<int> process_layor_multi(int loc, vector<int> in_bag, MultiGraph* g)
 	{
 		property_map < MultiGraph, vertex_index_t >::type
 			index_map = get(vertex_index, *g);
@@ -140,10 +140,9 @@ struct GraphComponent :
 			name = get(multi_name_t(), *g);
 		vector<int> out_bag;
 		int count = 0;
-		for (int i = 0; i < grainsize; ++i)
+		for (int i = 0; i < in_bag.size(); ++i)
 		{
-			int val = *in_bag;
-			++in_bag;
+			int val = in_bag[i];
 			graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
 
 			for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
@@ -159,7 +158,6 @@ struct GraphComponent :
 	}
 	void mpbfs(int index, int loc)
 	{
-		//pennants = std::vector <int> (num_vertices(g), -1);
 		name[index][loc] = index;
 		vector<int> v;
 		int dist = 0;
@@ -176,10 +174,10 @@ struct GraphComponent :
 					int last = i;
 					i += grainsize;
 					if (i < v.size())
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, it, ptr, grainsize)));
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr)));
 					else
 					{
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, it, ptr, v.size() - last)));
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr)));
 						break;
 					}
 				}
