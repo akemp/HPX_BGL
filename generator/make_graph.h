@@ -13,10 +13,6 @@
 #include <stdint.h>
 #include "graph_generator.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /* Simplified interface for users; implemented in different ways on different
  * platforms. */
 void make_graph(
@@ -44,8 +40,5 @@ void make_random_numbers(
        /* out */ double* result    /* Returned array of values */
 );
 
-#ifdef __cplusplus
-}
-#endif
 
 #endif /* MAKE_GRAPH_H */

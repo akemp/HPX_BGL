@@ -178,11 +178,10 @@ static void mrg_orig_step(mrg_state* state) { /* Use original A, not fully optim
 }
 
 #ifndef DUMP_TRANSITION_TABLE
-#include "mrg_transitions.c"
+#include "mrg_transitions.cpp"
 /* Defines this:
 extern const mrg_transition_matrix mrg_skip_matrices[][256]; */
 #endif
-
 void mrg_skip(mrg_state* state, uint_least64_t exponent_high, uint_least64_t exponent_middle, uint_least64_t exponent_low) {
   /* fprintf(stderr, "skip(%016" PRIXLEAST64 "%016" PRIXLEAST64 "%016" PRIXLEAST64 ")\n", exponent_high, exponent_middle, exponent_low); */
   int byte_index;

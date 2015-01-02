@@ -17,26 +17,26 @@
  * These may need to be tweaked to get acceptable performance on some platforms
  * (especially ones without conditional moves). */
 
-static  uint_fast32_t mod_add(uint_fast32_t a, uint_fast32_t b) {
+static uint_fast32_t mod_add(uint_fast32_t a, uint_fast32_t b) {
   assert (a <= 0x7FFFFFFE);
   assert (b <= 0x7FFFFFFE);
   return (a + b) % 0x7FFFFFFF;
 }
 
-static  uint_fast32_t mod_mul(uint_fast32_t a, uint_fast32_t b) {
+static uint_fast32_t mod_mul(uint_fast32_t a, uint_fast32_t b) {
   assert (a <= 0x7FFFFFFE);
   assert (b <= 0x7FFFFFFE);
   return (uint_fast32_t)((uint_fast64_t)a * b % 0x7FFFFFFF);
 }
 
-static  uint_fast32_t mod_mac(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t b) {
+static uint_fast32_t mod_mac(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t b) {
   assert (sum <= 0x7FFFFFFE);
   assert (a <= 0x7FFFFFFE);
   assert (b <= 0x7FFFFFFE);
   return (uint_fast32_t)(((uint_fast64_t)a * b + sum) % 0x7FFFFFFF);
 }
 
-static  uint_fast32_t mod_mac2(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t b, uint_fast32_t c, uint_fast32_t d) {
+static uint_fast32_t mod_mac2(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t b, uint_fast32_t c, uint_fast32_t d) {
   assert (sum <= 0x7FFFFFFE);
   assert (a <= 0x7FFFFFFE);
   assert (b <= 0x7FFFFFFE);
@@ -45,7 +45,7 @@ static  uint_fast32_t mod_mac2(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t
   return (uint_fast32_t)(((uint_fast64_t)a * b + (uint_fast64_t)c * d + sum) % 0x7FFFFFFF);
 }
 
-static  uint_fast32_t mod_mac3(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t b, uint_fast32_t c, uint_fast32_t d, uint_fast32_t e, uint_fast32_t f) {
+static uint_fast32_t mod_mac3(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t b, uint_fast32_t c, uint_fast32_t d, uint_fast32_t e, uint_fast32_t f) {
   assert (sum <= 0x7FFFFFFE);
   assert (a <= 0x7FFFFFFE);
   assert (b <= 0x7FFFFFFE);
@@ -56,7 +56,7 @@ static  uint_fast32_t mod_mac3(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t
   return (uint_fast32_t)(((uint_fast64_t)a * b + (uint_fast64_t)c * d + (uint_fast64_t)e * f + sum) % 0x7FFFFFFF);
 }
 
-static  uint_fast32_t mod_mac4(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t b, uint_fast32_t c, uint_fast32_t d, uint_fast32_t e, uint_fast32_t f, uint_fast32_t g, uint_fast32_t h) {
+static uint_fast32_t mod_mac4(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t b, uint_fast32_t c, uint_fast32_t d, uint_fast32_t e, uint_fast32_t f, uint_fast32_t g, uint_fast32_t h) {
   assert (sum <= 0x7FFFFFFE);
   assert (a <= 0x7FFFFFFE);
   assert (b <= 0x7FFFFFFE);
@@ -74,15 +74,15 @@ static  uint_fast32_t mod_mac4(uint_fast32_t sum, uint_fast32_t a, uint_fast32_t
  * number generator.  The techniques for fast multiplication by these
  * particular values are in L'Ecuyer's papers; we don't use them yet. */
 
-static  uint_fast32_t mod_mul_x(uint_fast32_t a) {
+static uint_fast32_t mod_mul_x(uint_fast32_t a) {
   return mod_mul(a, 107374182);
 }
 
-static  uint_fast32_t mod_mul_y(uint_fast32_t a) {
+static uint_fast32_t mod_mul_y(uint_fast32_t a) {
   return mod_mul(a, 104480);
 }
 
-static  uint_fast32_t mod_mac_y(uint_fast32_t sum, uint_fast32_t a) {
+static uint_fast32_t mod_mac_y(uint_fast32_t sum, uint_fast32_t a) {
   return mod_mac(sum, a, 104480);
 }
 

@@ -1,11 +1,12 @@
 
 set (sources
+     headers.hpp
      main.cpp
-     validate.cpp
+	 structures.cpp
 )
      
 add_hpx_executable(hpx_bgl
 SOURCES ${sources}
 FOLDER
-COMPONENT_DEPENDENCIES
-DEPENDENCIES graph500 metis)
+COMPONENT_DEPENDENCIES iostreams
+DEPENDENCIES metis generator)

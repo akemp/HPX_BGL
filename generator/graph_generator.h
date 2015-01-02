@@ -20,11 +20,6 @@
 #endif
 #include <inttypes.h>
 
-#define GENERATOR_USE_PACKED_EDGE_TYPE
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #ifdef GENERATOR_USE_PACKED_EDGE_TYPE
 
@@ -38,14 +33,14 @@ static int64_t get_v0_from_edge(const packed_edge* p) {
   return (p->v0_low | ((int64_t)((int16_t)(p->high & 0xFFFF)) << 32));
 }
 
-static  int64_t get_v1_from_edge(const packed_edge* p) {
+static int64_t get_v1_from_edge(const packed_edge* p) {
   return (p->v1_low | ((int64_t)((int16_t)(p->high >> 16)) << 32));
 }
 
-static  void write_edge(packed_edge* p, int64_t v0, int64_t v1) {
+static void write_edge(packed_edge* p, int64_t v0, int64_t v1) {
   p->v0_low = (uint32_t)v0;
   p->v1_low = (uint32_t)v1;
-  p->high = ((v0 >> 32) & 0xFFFF) | (((v1 >> 32) & 0xFFFF) << 16);
+  p->high = (uint32_t)(((v0 >> 32) & 0xFFFF) | (((v1 >> 32) & 0xFFFF) << 16));
 }
 
 #else
@@ -55,15 +50,15 @@ typedef struct packed_edge {
   int64_t v1;
 } packed_edge;
 
-static  int64_t get_v0_from_edge(const packed_edge* p) {
+static inline int64_t get_v0_from_edge(const packed_edge* p) {
   return p->v0;
 }
 
-static  int64_t get_v1_from_edge(const packed_edge* p) {
+static inline int64_t get_v1_from_edge(const packed_edge* p) {
   return p->v1;
 }
 
-static  void write_edge(packed_edge* p, int64_t v0, int64_t v1) {
+static inline void write_edge(packed_edge* p, int64_t v0, int64_t v1) {
   p->v0 = v0;
   p->v1 = v1;
 }
@@ -80,9 +75,5 @@ void generate_kronecker_range(
        int64_t start_edge, int64_t end_edge /* Indices (in [0, M)) for the edges to generate */,
        packed_edge* edges /* Size >= end_edge - start_edge */
 );
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif /* GRAPH_GENERATOR_H */

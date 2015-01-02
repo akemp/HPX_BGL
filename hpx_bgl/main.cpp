@@ -1,393 +1,544 @@
-//  Copyright (c) 2011 Matthew Anderson
+//  Copyright (c) 2014 Andrew Kemp
 //
 //  Distributed under the Boost Software License, Version 1.0. (See accompanying
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
-#include <fstream>
-#include <iostream>
-#include <vector>
-#include <queue>
-//#include <hpx/hpx.hpp>
-//#include <hpx/hpx_init.hpp>
+#include "headers.hpp"
 
-#include <hpx/util/high_resolution_timer.hpp>
+#include <hpx/include/components.hpp>
 
-#include "../graph500/make-edgelist.h"
-#include "../graph500/graph500.h"
-#include "../graph500/generator/make_graph.h"
+#include "../generator/make_graph.h"
+#include "../generator/utils.h"
 
-#include "../graph500/prng.h"
-#include "../graph500/generator/splittable_mrg.h"
+using hpx::components::stub_base;
+using hpx::components::client_base;
+using hpx::components::managed_component;
+using hpx::components::managed_component_base;
 
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/breadth_first_search.hpp>
+typedef hpx::lcos::local::spinlock mutex_type;
 
-
-typedef boost::adjacency_list < boost::vecS, boost::vecS, boost::undirectedS > graph_t;
-
-//int64_t *deg, *next;
-typedef std::pair < int, int > Edge;
-typedef std::vector<Edge> Edges;
-
-#define VERBOSE true
-
-void get_maxedge(struct packed_edge *IJ_in, int64_t nedge, int64_t &maxvtx);
-
-int create_graph_from_edgelist(struct packed_edge *IJ_in, int64_t nedge,
-	int64_t &maxvtx, int64_t& maxdeg, int64_t* head, int64_t* deg, int64_t* next);
-
-int make_bfs_tree(int64_t *bfs_tree_out, int64_t *max_vtx_out,
-	int64_t srcvtx, packed_edge * IJ, int64_t maxvtx, int64_t* head, int64_t* next);
-
-void verify(int NBFS_max, int64_t nvtx_scale, int NBFS, int64_t nedge,
-	packed_edge* IJ, int64_t* bfs_root);
-
-void search(int NBFS, int64_t nvtx_scale, int64_t* bfs_root, int64_t nedge,
-	packed_edge* IJ, int64_t maxvtx, int64_t* head, int64_t *next);
-
-void verify_boost(int NBFS_max, int64_t nvtx_scale, int NBFS, int64_t nedge,
-	Edges* edges, int64_t* bfs_root)
+using namespace boost;
+using namespace std;
+struct GraphComponent :
+	hpx::components::managed_component_base<GraphComponent>
 {
-	using namespace boost;
-	int * has_adj;
-	int m, err;
-	int64_t k, t;
+	void set(vector<vector<uint32_t>> nodes, int size, int edge, int starts)
+	{
+		for (int i = 0; i < nodes.size(); ++i)
+		{
+			for (int j = 0; j < nodes[i].size(); ++j)
+				add_edge(i, nodes[i][j], g);
+		}
+		grainsize = size;
+		edgefact = edge;
 
-	has_adj = new int[nvtx_scale];
-	for (k = 0; k < nvtx_scale; ++k)
-		has_adj[k] = 0;
+		names = vector<vector<int>>(starts, vector<int>(num_vertices(g), -1));
+		//multireset(starts);
+	}
+	int getval(int index, int i)
+	{
+		return names[i][index];
+	}
+	void setmulti(vector<vector<uint32_t>> nodes, int size, int edge, int starts)
+	{
+		for (int i = 0; i < nodes.size(); ++i)
+		{
+			for (int j = 0; j < nodes[i].size(); ++j)
+				add_edge(i, nodes[i][j], g);
+		}
+		grainsize = size;
+		edgefact = edge;
 
-	graph_traits<graph_t>::edge_iterator ei, ei_end;
-	for (auto it = edges->begin(); it < edges->end(); ++it)//(boost::tie(ei, ei_end) = edges(g); ei != ei_end; ++ei)
+
+		names = vector<vector<int>>(starts, vector<int>(num_vertices(g), -1));
+		//multireset(starts);
+	}
+
+	void multival(vector<int> starts, bool sequential)
+	{
+		if (!sequential)
+		{
+			vector<hpx::future<void>> futures;
+			int i = 0;
+			int adder = 1;
+			for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
+			{
+				int last = i;
+				i += adder;
+				if (i < starts.size())
+				{
+					futures.push_back(hpx::async(&runMp, it, last, adder, this));
+				}
+				else
+				{
+					futures.push_back(hpx::async(&runMp, it, last, starts.size() - last, this));
+					break;
+				}
+			}
+			hpx::wait_all(futures);
+		}
+		else
+		{
+			for (int i = 0; i < starts.size(); ++i)
+			{
+				mpbfs(starts[i], i);
+			}
+		}
+	}
+	static void runMp(vector<int>::iterator loc, int index, int size, GraphComponent* gc)
+	{
+		for (int i = 0; i < size; ++i)
+		{
+			gc->mpbfs(*loc, index + i);
+			++loc;
+		}
+	}
+	static vector<int> process_layor_multi(int loc, vector<int> in_bag, MultiGraph* g, vector<int> *names)
+	{
+		property_map < MultiGraph, vertex_index_t >::type
+			index_map = get(vertex_index, *g);
+		vector<int> out_bag;
+		int count = 0;
+		for (int i = 0; i < in_bag.size(); ++i)
+		{
+			int val = in_bag[i];
+			graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
+
+			for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
+			{
+				int ind = get(index_map, *ai);
+				if ((*names)[ind] >= 0)
+					continue;
+				(*names)[ind] = val;
+				out_bag.push_back(ind);
+			}
+		}
+		return out_bag;
+	}
+	void mpbfs(int index, int loc)
+	{
+		names[loc][index] = index;
+		vector<int> * name = &names[loc];
+		vector<int> v;
+		int dist = 0;
+		v.push_back(index);
+		MultiGraph* ptr = &g;
+		while (!v.empty())
+		{
+			vector<hpx::future<vector<int>>> futures;
+			futures.reserve(v.size() / grainsize + 1);
+			{
+				int i = 0;
+				for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
+				{
+					int last = i;
+					i += grainsize;
+					if (i < v.size())
+						futures.push_back(hpx::async(hpx::util::bind(
+						&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr, name
+						)));
+					else
+					{
+						futures.push_back(hpx::async(hpx::util::bind(
+							&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr, name
+							)));
+						break;
+					}
+				}
+			}
+			//hpx::wait_all(futures.begin(), futures.end());
+			vector<int> children;
+			for (int i = 0; i < futures.size(); ++i)
+			{
+				vector<int> future = futures[i].get();
+				children.insert(children.end(), future.begin(), future.end());
+			}
+			v = children;
+		}
+	}
+
+	void bfs_search_act(vector<int> starts)
 	{
 
-		const int64_t i = it->first;//source(*ei, g);
-		const int64_t j = it->second;//target(*ei, g);
-		if (i != j)
-			has_adj[i] = has_adj[j] = 1;
-	}
-
-	/* Sample from {0, ..., nvtx_scale-1} without replacement. */
-	m = 0;
-	t = 0;
-	while (m < NBFS && t < nvtx_scale) {
-		double R = mrg_get_double_orig(prng_state);
-		if (!has_adj[t] || (nvtx_scale - t)*R > NBFS - m) ++t;
-		else bfs_root[m++] = t++;
-	}
-	if (t >= nvtx_scale && m < NBFS) {
-		if (m > 0) {
-			fprintf(stderr, "Cannot find %d sample roots of non-self degree > 0, using %d.\n",
-				NBFS, m);
-			NBFS = m;
-		}
-		else {
-			fprintf(stderr, "Cannot find any sample roots of non-self degree > 0.\n");
-			exit(EXIT_FAILURE);
+		for (int i = 0; i < starts.size(); ++i)
+		{
+			bfs_search(starts[i], i);
 		}
 	}
 
-	free(has_adj);
-}
-
-
-static int
-compute_levels_boost(int64_t * level,
-int64_t nv, const int64_t * bfs_tree, int64_t root)
-{
-	int err = 0;
-
+	void bfs_search(int index, int loc)
 	{
-		int terr;
-		int64_t k;
+		property_map < MultiGraph, vertex_index_t >::type
+			index_map = get(vertex_index, g);
+		//pennants = std::vector <int>(num_vertices(g), -1);
+		names[loc][index] = index;
+		vector<int> q;
+		q.reserve(num_vertices(g));
+		q.push_back(index);
+		int dist = 0;
+		int spot = 0;
+		while (spot < q.size())
+		{
+			int ind = q[spot];
+			++spot;
+			int parent = ind;
+			graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
 
-			for (k = 0; k < nv; ++k)
-				level[k] = (k == root ? 0 : -1);
-
-			for (k = 0; k < nv; ++k) {
-			if (level[k] >= 0) continue;
-			terr = err;
-			if (!terr && bfs_tree[k] >= 0 && k != root) {
-				int64_t parent = k;
-				int64_t nhop = 0;
-				/* Run up the tree until we encounter an already-leveled vertex. */
-				while (parent >= 0 && level[parent] < 0 && nhop < nv) {
-					assert(parent != bfs_tree[parent]);
-					parent = bfs_tree[parent];
-					++nhop;
-				}
-				if (nhop >= nv) terr = -1; /* Cycle. */
-				if (parent < 0) terr = -2; /* Ran off the end. */
-
-				if (!terr) {
-					/* Now assign levels until we meet an already-leveled vertex */
-					/* NOTE: This permits benign races if parallelized. */
-					nhop += level[parent];
-					parent = k;
-					while (level[parent] < 0) {
-						assert(nhop > 0);
-						level[parent] = nhop--;
-						parent = bfs_tree[parent];
-					}
-					assert(nhop == level[parent]);
-
-					/* Internal check to catch mistakes in races... */
-#if !defined(NDEBUG)
-					nhop = 0;
-					parent = k;
-					int64_t lastlvl = level[k] + 1;
-					while (level[parent] > 0) {
-						assert(lastlvl == 1 + level[parent]);
-						lastlvl = level[parent];
-						parent = bfs_tree[parent];
-						++nhop;
-					}
-#endif
+			for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
+			{
+				int ind = get(index_map, *ai);
+				if (names[loc][ind] < 0)
+				{
+					names[loc][ind] = parent;
+					q.push_back(ind);
 				}
 			}
-			if (terr) { err = terr;}
-			}
+
+		}
+	};
+
+	int getnum()
+	{
+		return num_vertices(g);
 	}
-	return err;
-}
 
-int64_t
-verify_bfs_tree_boost(int64_t *bfs_tree_in, int64_t max_bfsvtx,
-int64_t root,
-Edges* edges, int64_t nedge)
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, set, set_action);
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getval, getval_action);
+
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, setmulti, setmulti_action);
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, multival, multival_action);
+
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, bfs_search_act, bfs_search_action);
+
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getnum, num_vertices_action);
+	MultiGraph g;
+	int grainsize = 9999;
+	int edgefact = 16;
+	vector<vector<int>> names;
+	bool active = false;
+};
+
+
+typedef managed_component<GraphComponent> server_type;
+HPX_REGISTER_MINIMAL_COMPONENT_FACTORY(server_type, GraphComponent);
+
+typedef GraphComponent::set_action set_action;
+HPX_REGISTER_ACTION_DECLARATION(set_action);
+HPX_REGISTER_ACTION(set_action);
+
+typedef GraphComponent::getval_action getval_action;
+HPX_REGISTER_ACTION_DECLARATION(getval_action);
+HPX_REGISTER_ACTION(getval_action);
+
+typedef GraphComponent::setmulti_action setmulti_action;
+HPX_REGISTER_ACTION_DECLARATION(setmulti_action);
+HPX_REGISTER_ACTION(setmulti_action);
+
+
+typedef GraphComponent::multival_action multival_action;
+HPX_REGISTER_ACTION_DECLARATION(multival_action);
+HPX_REGISTER_ACTION(multival_action);
+
+
+typedef GraphComponent::bfs_search_action bfs_search_action;
+HPX_REGISTER_ACTION_DECLARATION(bfs_search_action);
+HPX_REGISTER_ACTION(bfs_search_action);
+
+typedef GraphComponent::num_vertices_action num_vertices_action;
+HPX_REGISTER_ACTION_DECLARATION(num_vertices_action);
+HPX_REGISTER_ACTION(num_vertices_action);
+
+struct graph_manager : client_base<graph_manager, GraphComponent>
 {
-	int64_t * bfs_tree = bfs_tree_in;
-	//const packed_edge * IJ = IJ_in;
+	typedef client_base<graph_manager, GraphComponent> base_type;
 
-	int err, nedge_traversed;
-	int64_t * seen_edge, * level;
+	graph_manager(hpx::future<hpx::id_type> && id) : base_type(std::move(id)) {}
 
-	const int64_t nv = max_bfsvtx + 1;
-
-	/*
-	This code is horrifically contorted because many compilers
-	complain about continue, return, etc. in parallel sections.
-	*/
-
-	if (root > max_bfsvtx || bfs_tree[root] != root)
-		return -999;
-
-	err = 0;
-	nedge_traversed = 0;
-	seen_edge = new int64_t[2 * (nv)];
-	level = &seen_edge[nv];
-
-	err = compute_levels_boost(level, nv, bfs_tree, root);
-
-	if (err) goto done;
-
-	 {
-		int64_t k;
-		int terr = 0;
-			for (k = 0; k < nv; ++k)
-				seen_edge[k] = 0;
-
-			//for (k = 0; k < nedge; k++) {
-			boost::graph_traits<graph_t>::edge_iterator ei, ei_end;
-			//for (boost::tie(ei, ei_end) = edges(g); ei != ei_end; ++ei) {
-			for (auto it = edges->begin(); it < edges->end(); ++it) {
-				const int64_t i = it->first;//source(*ei, g);
-				const int64_t j = it->second;//target(*ei, g);
-				int64_t lvldiff;
-				terr = err;
-
-				if (i < 0 || j < 0) continue;
-				if (i > max_bfsvtx && j <= max_bfsvtx) terr = -10;
-				if (j > max_bfsvtx && i <= max_bfsvtx) terr = -11;
-				if (terr) { err = terr; }
-				if (terr || i > max_bfsvtx /* both i & j are on the same side of max_bfsvtx */)
-					continue;
-
-				/* All neighbors must be in the tree. */
-				if (bfs_tree[i] >= 0 && bfs_tree[j] < 0) terr = -12;
-				if (bfs_tree[j] >= 0 && bfs_tree[i] < 0) terr = -13;
-				if (terr) { err = terr; }
-				if (terr || bfs_tree[i] < 0 /* both i & j have the same sign */)
-					continue;
-
-				/* Both i and j are in the tree, count as a traversed edge.
-
-				NOTE: This counts self-edges and repeated edges.  They're
-				part of the input data.
-				*/
-				++nedge_traversed;
-				/* Mark seen tree edges. */
-				if (i != j) {
-					if (bfs_tree[i] == j)
-						seen_edge[i] = 1;
-					if (bfs_tree[j] == i)
-						seen_edge[j] = 1;
-				}
-				lvldiff = level[i] - level[j];
-				/* Check that the levels differ by no more than one. */
-				if (lvldiff > 1 || lvldiff < -1)
-					terr = -14;
-				if (terr) { err = terr; }
-			}
-
-		if (!terr) {
-			/* Check that every BFS edge was seen and that there's only one root. */
-				for (k = 0; k < nv; ++k) {
-				terr = err;
-				if (!terr && k != root) {
-					if (bfs_tree[k] >= 0 && !seen_edge[k])
-						terr = -15;
-					if (bfs_tree[k] == k)
-						terr = -16;
-					if (terr) { err = terr; }
-				}
-				}
-		}
+	void pbfs_search(vector<int >index)
+	{
+		hpx::async<multival_action>(this->get_gid(), index, true).get();
 	}
-done:
-
-	free(seen_edge);
-	if (err) return err;
-	return nedge_traversed;
-}
-
-int make_bfs_tree_boost(int64_t *bfs_tree_out,
-	int64_t srcvtx, Edges *edges, int64_t maxvtx, int64_t* head, int64_t* next)
-{
-	int64_t * bfs_tree = bfs_tree_out;
-	int err = 0;
-	const int64_t nv = maxvtx + 1;
-
-	int64_t k, k1, k2, newk2;
-	int64_t * vlist;
-
-
-	bfs_tree[srcvtx] = srcvtx;
-	newk2 = 1;
-
-	vlist = new int64_t[nv];
-	if (!vlist) return -1;
-	bfs_tree[srcvtx] = srcvtx;
-	k1 = 0; k2 = 1;
-	vlist[0] = srcvtx;
-
-	for (k = 0; k < srcvtx; ++k)
-		bfs_tree[k] = -1;
-	for (k = srcvtx + 1; k < nv; ++k)
-		bfs_tree[k] = -1;
-
-	while (k1 != k2) {
-		int64_t k, newk2 = k2;
-		for (k = k1; k < k2; ++k) {
-			const int64_t parent = vlist[k];
-			int64_t p = head[parent];
-			while (p >= 0) {
-				const int64_t newv = ((p % 2) ? (*edges)[p / 2].second : (*edges)[p / 2].first);//get_v1_from_edge(&IJ[p / 2]) : get_v0_from_edge(&IJ[p / 2]));
-				if (bfs_tree[newv] < 0) {
-					bfs_tree[newv] = parent;
-					vlist[newk2++] = newv;
-				}
-				p = next[p];
-			}
-			k1 = k2;
-			k2 = newk2;
-		}
+	void set(vector<vector<uint32_t>>& edges, int grainsize, int edgefact, int starts)
+	{
+		hpx::async<set_action>(this->get_gid(), edges, grainsize, edgefact, starts).get();
 	}
-	free(vlist);
+	int getval(int index, int i)
+	{
+		return hpx::async<getval_action>(this->get_gid(), index, i).get();
+	}
+	void setmulti(vector<vector<uint32_t>>& edges, int grainsize, int edgefact, int starts)
+	{
+		hpx::async<setmulti_action>(this->get_gid(), edges, grainsize, edgefact, starts).get();
+	}
+	void multival(vector<int> starts)
+	{
+		hpx::async<multival_action>(this->get_gid(), starts, false).get();
+	}
 
-	return err;
-}
-void search_boost(
-	int NBFS, int64_t nvtx_scale, int64_t* bfs_root, int64_t nedge, Edges* edges,
-	int64_t maxvtx, int64_t* head, int64_t* next)
+	void bfs_search(vector<int> starts)
+	{
+		hpx::async<bfs_search_action>(this->get_gid(), starts).get();
+	}
+	int getmultival(int index, int i)
+	{
+
+		return hpx::async<getval_action>(this->get_gid(), index, i).get();
+	}
+	int getnum()
+	{
+
+		return hpx::async<num_vertices_action>(this->get_gid()).get();
+	}
+
+};
+
+
+void parallel_edge_gen(vector<packed_edge>::iterator pedges, vector<vector<uint32_t>>* nodes, int size, vector<mutex_type*>* muts)
 {
-	//bool VERBOSE = true;
-	int m, err = 0;
-	int64_t k, t;
-	int64_t* bfs_nedge = new int64_t[nvtx_scale];
-	for (m = 0; m < NBFS; ++m) {
-		int64_t *bfs_tree, max_bfsvtx;
-
-		/* Re-allocate. Some systems may randomize the addres... */
-		bfs_tree = new int64_t[nvtx_scale];
-		assert(bfs_root[m] < nvtx_scale);
-
-		if (VERBOSE) fprintf(stderr, "Running bfs %d...", m);
-
-		err = make_bfs_tree_boost(bfs_tree, bfs_root[m], (edges), maxvtx, head, next);
-
-		if (VERBOSE) fprintf(stderr, "done\n");
-
-		if (err) {
-			perror("make_bfs_tree failed");
-			abort();
+	for (int i = 0; i < size; ++i)
+	{
+		int v0 = pedges->v0_low;
+		int v1 = pedges->v1_low;
+		++pedges;
+		if (v0 == v1)
+			continue;
+		{
+			//undirected so no changes to final edgelist
+			if (v1 > v0)
+			{
+				int temp = v0;
+				v0 = v1;
+				v1 = v0;
+			}
+			mutex_type::scoped_lock l1(*(*muts)[v0]);
+			if (std::find((*nodes)[v0].begin(), (*nodes)[v0].end(), v1) != (*nodes)[v0].end())
+				continue;
+			(*nodes)[v0].push_back(v1);
 		}
-
-		if (VERBOSE) fprintf(stderr, "Verifying bfs %d...", m);
-		bfs_nedge[m] = verify_bfs_tree_boost(bfs_tree, maxvtx, bfs_root[m], (edges), nedge);
-		if (VERBOSE) fprintf(stderr, "done\n");
-		if (bfs_nedge[m] < 0) {
-			fprintf(stderr, "bfs %d from %" PRId64 " failed verification (%" PRId64 ")\n",
-				m, bfs_root[m], bfs_nedge[m]);
-			abort();
-		}
-
-		free(bfs_tree);
 	}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-int init()//hpx_main(boost::program_options::variables_map &vm)
+int main()
 {
-    packed_edge * IJ;
-    int64_t nedge = getedge();
-    uint64_t scale = getscale();
-    IJ = new packed_edge[nedge];
 
-    //makeEdgeList(IJ);
-    int64_t desired_nedge = nedge;
-    uint64_t userseed = 22222;
-    make_graph((int)scale, desired_nedge, userseed, userseed, &nedge, (packed_edge**)(&IJ));
-    
-	int64_t maxvtx, maxdeg;
-	get_maxedge(IJ, nedge, maxvtx);
-	int64_t* deg;
-	int64_t* next;
-	int64_t* head = new int64_t[(2 * (maxvtx + 1) + 2 * nedge)];
+	using namespace std;
+	cout << "threads: " << hpx::get_os_thread_count() << endl;
 
+	int nnodes;
+	int scale;
+	cout << "Enter scale (nodes=2^input): ";
+	cin >> scale;
+	int ind;
+	cout << "Enter edges per node: ";
+	cin >> ind;
+	int grainsize;
+#ifdef CUSTOMGRAIN
+	cout << "Enter grainsize: ";
+	cin >> grainsize;
+#else
+	grainsize = 128;
+#endif
 
-	deg = &head[maxvtx + 1];
-	next = &deg[maxvtx + 1];
+	int searches;
+	cout << "Enter searches: ";
+	cin >> searches;
+	int acctest = 1;
+	//cout << "Run accuracy tests (0 for no, 1 for yes)?";
+	//cin >> acctest;
+	nnodes = pow(2, scale);
+	//
+	boost::random::mt19937 rng;
+	boost::random::uniform_int_distribution<> randnodes(0, nnodes*ind);
 
-	for (int64_t k = 0; k <= maxvtx; ++k) {
-		head[k] = -1;
-		deg[k] = 0;
-	}
+	uint64_t seed1 = 4, seed2 = 3;
 
-	create_graph_from_edgelist(IJ, nedge, maxvtx, maxdeg, *(&head), *(&deg), *(&next));
+	uint_fast32_t seed;
 
+	make_mrg_seed(seed1, seed2, &seed);
 
-    int64_t* bfs_root = new int64_t[getNBFS_max()];
-
-    verify(getNBFS_max(), getnvtx_scale(), getNBFS(), nedge, IJ, bfs_root);
-	search(getNBFS(), getnvtx_scale(), bfs_root, nedge, IJ, maxvtx, head, next);
-	if (true)
+	//Edges edges;
+	vector<vector<uint32_t>> nodes(
+		nnodes
+		);
+	vector<mutex_type*> muts(nodes.size());
+	for (int i = 0; i < nodes.size(); ++i)
 	{
-		using namespace boost;
-		//graph_t g;
-		Edges edgelist = Edges(nedge);
-		for (int i = 0; i < nedge; ++i)
-		{
-			edgelist[i] = Edge(IJ[i].v0_low, IJ[i].v1_low);
-			//add_edge(IJ[i].v0_low, IJ[i].v1_low, g);
-		}
-
-		int64_t* bfs_root2 = new int64_t[getNBFS_max()];
-		verify_boost(getNBFS_max(), getnvtx_scale(), getNBFS(), nedge, &edgelist, bfs_root2);
-		search_boost(getNBFS_max(), getnvtx_scale(), bfs_root2, nedge, &edgelist, maxvtx, head, next);
+		muts[i] = new mutex_type;
 	}
-    return 0;
-}
-int main() {
-    return init();//hpx::init();
+	vector<packed_edge> pedges(nnodes*ind);
+	generate_kronecker_range(&seed, scale, 0, pedges.size(), &pedges.front());
+	cout << "Kronecker range generated. Making edgelist.\n";
+	{
+		vector<hpx::thread> edgefuts;
+		int addsize = grainsize * 16;
+		for (int i = 0; i < pedges.size(); i += addsize)
+		{
+			if (i + addsize < pedges.size())
+			{
+				edgefuts.push_back(hpx::thread(
+					hpx::util::bind(&parallel_edge_gen, pedges.begin() + i, &nodes, addsize, &muts))
+					);
+			}
+			else
+			{
+				edgefuts.push_back(hpx::thread(
+					hpx::util::bind(&parallel_edge_gen, pedges.begin() + i, &nodes, pedges.size() - i, &muts))
+					);
+				break;
+			}
+		}
+		for (int i = 0; i < edgefuts.size(); ++i)
+			edgefuts[i].join();
+	}
+	cout << "Edgelist generated. Running tests.\n";
+
+
+	vector<int> starts(searches);
+
+	vector<vector<pair<int, int>>> counts;
+	if (acctest != 0)
+	{
+		cout << "Setting up serial values for testing.\n";
+		counts = vector<vector<pair<int, int>>>(starts.size(), vector<pair<int, int>>(64, pair<int, int>(-1, 0)));
+	}
+	int nverts;
+	{
+		graph_manager hw = graph_manager::create(hpx::find_here());
+		hw.setmulti(nodes, grainsize, ind, starts.size());
+		nverts = hw.getnum();
+		randnodes = boost::random::uniform_int_distribution<>(0, nverts - 1);
+		for (int j = 0; j < starts.size(); ++j)
+		{
+			starts[j] = randnodes(rng);
+		}
+		hw.bfs_search(starts);
+		for (int j = 0; j < starts.size(); ++j)
+		{
+			if (acctest != 0)
+			{
+				//sub.reset();
+				//sub.bfs_search(starts[j]);
+				for (int i = 0; i < counts[j].size(); ++i)
+				{
+					int sample = randnodes(rng);
+					counts[j][i].first = sample;
+					int count = 0;
+					while (sample != starts[j])
+					{
+						count++;
+						if (sample == -1)
+						{
+							count = -1;
+							break;
+						}
+						//cout << sample << "-" << sub.pennants[sample].dist << " ";
+						sample = hw.getmultival(sample, j);
+					}
+					counts[j][i].second = count;
+					//cout << endl;
+				}
+			}
+		}
+	}
+	if (acctest != 0)
+	{
+		cout << "Running accuracy tests.\n";
+		
+
+		{
+			hpx::util::high_resolution_timer t;
+			t.restart();
+		  graph_manager hw = graph_manager::create(hpx::find_here());
+		  hw.set(nodes, grainsize, ind, starts.size());
+		  hpx::util::high_resolution_timer t1;
+		  hw.pbfs_search(starts);
+		  double elapsed = t.elapsed();
+		  double elapsed1 = t1.elapsed();
+		  cout << elapsed << "s for parallel component\n";
+		  cout << elapsed1 << "s search time for parallel component\n";
+		  for (int j = 0; j < starts.size(); ++j)
+		  {
+		  
+			  for (int i = 0; i < counts[j].size(); ++i)
+			  {
+				  int sample = counts[j][i].first;
+				  int count = 0;
+				  while (sample != starts[j])
+				  {
+					  count++;
+					  if (sample == -1)
+					  {
+						  count = -1;
+						  break;
+					  }
+					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+					  sample = hw.getval(sample,j);
+				  }
+				  if (counts[j][i].second != count)
+					  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+				  //cout << endl;
+			  }
+
+		  }
+	  }
+	  {
+		  hpx::util::high_resolution_timer t;
+		  t.restart();
+		  graph_manager hw = graph_manager::create(hpx::find_here());
+		  hw.setmulti(nodes, grainsize, ind, starts.size());
+		  hpx::util::high_resolution_timer t1;
+		  hw.multival(starts);
+
+		  double elapsed1 = t1.elapsed();
+		  double elapsed = t.elapsed();
+		  cout << elapsed << "s for highly parallel\n";
+		  cout << elapsed1 << "s search time for highly parallel\n";
+
+		  for (int j = 0; j < starts.size(); ++j)
+		  {
+			  for (int i = 0; i < counts[j].size(); ++i)
+			  {
+				  int sample = counts[j][i].first;
+				  int count = 0;
+				  while (sample != starts[j])
+				  {
+					  count++;
+					  if (sample == -1)
+					  {
+						  count = -1;
+						  break;
+					  }
+					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+					  sample = hw.getmultival(sample, j);
+				  }
+				  if (counts[j][i].second != count)
+					  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+				  //cout << endl;
+			  }
+		  }
+	  }
+
+		cout << "Accuracy tests complete.\n";
+	}
+	cout << "Serial comparison:\n";
+	{
+		hpx::util::high_resolution_timer t;
+		t.restart();
+		graph_manager hw = graph_manager::create(hpx::find_here());
+		hw.setmulti(nodes, grainsize, ind, starts.size());
+
+		hpx::util::high_resolution_timer t1;
+		{
+			hw.bfs_search(starts);
+		}
+		double elapsed = t.elapsed();
+		double elapsed1 = t1.elapsed();
+		cout << elapsed << "s for serial\n";
+		cout << elapsed1 << "s search time for serial\n";
+	}
+
+	int s;
+	cin >> s;
+	return 0;
 }
