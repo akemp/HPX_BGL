@@ -12,13 +12,6 @@
 
 #include "splittable_mrg.h"
 
-#ifndef mrg_transition_matrix
-typedef struct mrg_transition_matrix {
-	uint_fast32_t s, t, u, v, w;
-	/* Cache for other parts of matrix (see mrg_update_cache function)     */
-	uint_fast32_t a, b, c, d;
-} mrg_transition_matrix;
-#endif
 
 const mrg_transition_matrix mrg_skip_matrices[][256] = {
 /* Byte 0 */ {
