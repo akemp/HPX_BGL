@@ -17,48 +17,8 @@ using hpx::components::managed_component_base;
 
 typedef hpx::lcos::local::spinlock mutex_type;
 
-struct multi_name_t {
-	typedef boost::vertex_property_tag kind;
-};
-
-typedef boost::property<multi_name_t, vector<int> > MultiColor; //parent, color, partition, distance
-typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
-	MultiColor> MultiGraph;
-
-int get_parts(std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy, std::vector<idx_t> &part,
-	idx_t nparts)
-{
-	// Needed by parmetis
-	idx_t nvtxs = xadj.size() - 1, ncon = 1;
-	idx_t *vsize = NULL;
-	idx_t *vwgt = NULL, *adjwgt = NULL;
-	real_t *tpwgts = NULL, *ubvec = NULL;
-	idx_t *options = NULL;
-	idx_t objval;
-	int result = METIS_PartGraphKway(
-		&nvtxs, &ncon, &xadj[0], &adjncy[0], vwgt,
-		vsize, adjwgt, &nparts, tpwgts,
-		ubvec, options, &objval, &part[0]);
-	return result;
-}
-void toCSR(const std::vector<std::vector<idx_t>>& nodes, std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy)
-{
-	int total = 0;
-	xadj.push_back(0);
-	for (int i = 0; i < nodes.size(); ++i)
-	{
-		for (int j = 0; j < nodes[i].size(); ++j)
-		{
-			adjncy.push_back(nodes[i][j]);
-			++total;
-		}
-		xadj.push_back(total);
-	}
-	return;
-}
-
-typedef struct Subgraph;
-
+using namespace boost;
+using namespace std;
 struct GraphComponent :
 	hpx::components::managed_component_base<GraphComponent>
 {
@@ -294,10 +254,8 @@ struct GraphComponent :
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, bfs_search_act, bfs_search_action);
 
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getnum, num_vertices_action);
-public:
 	property_map<MultiGraph, multi_name_t>::type
 		name;
-private:
 	MultiGraph g;
 	int grainsize = 9999;
 	int edgefact = 16;

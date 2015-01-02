@@ -2,6 +2,7 @@
 set (sources
      headers.hpp
      main.cpp
+	 structures.cpp
 )
      
 add_hpx_executable(hpx_bgl
