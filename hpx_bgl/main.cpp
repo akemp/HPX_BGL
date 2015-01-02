@@ -22,6 +22,38 @@ using namespace std;
 struct GraphComponent :
 	hpx::components::managed_component_base<GraphComponent>
 {
+
+	static void parreset(MultiGraph* g, int start, int size, int toggled)
+	{
+		property_map<MultiGraph, multi_name_t>::type
+			name = get(multi_name_t(), *g);
+		for (int i = start; i < start + size; ++i)
+		{
+			name[i] = vector<int>(toggled, -1);
+		}
+	}
+
+	void reset(int toggled)
+	{
+		int adder = grainsize;
+
+		vector<hpx::future<void>> futs;
+		MultiGraph* ptr = &g;
+
+		for (int i = 0; i < num_vertices(g); i += adder)
+		{
+			if (i + adder < num_vertices(g))
+			{
+				futs.push_back(hpx::async(&parreset, ptr, i, adder, toggled));
+			}
+			else
+			{
+				futs.push_back(hpx::async(&parreset, ptr, i, num_vertices(g) - i, toggled));
+			}
+		}
+		hpx::wait_all(futs);
+
+	}
 	void set(vector<vector<uint32_t>> nodes, int size, int edge, int starts)
 	{
 		for (int i = 0; i < nodes.size(); ++i)
@@ -32,13 +64,21 @@ struct GraphComponent :
 		grainsize = size;
 		edgefact = edge;
 
-		names = vector<vector<int>>(starts, vector<int>(num_vertices(g), -1));
-		//multireset(starts);
+		name = get(multi_name_t(), g);
+		multireset(starts);
 	}
-	int getval(int index, int i)
+	int getval(int i, int index)
 	{
-		return names[i][index];
+		return name[i][index];
 	}
+	void multireset(int starts)
+	{
+		for (int i = 0; i < num_vertices(g); ++i)
+		{
+			name[i] = vector<int>(starts, -1);
+		}
+	}
+
 	void setmulti(vector<vector<uint32_t>> nodes, int size, int edge, int starts)
 	{
 		for (int i = 0; i < nodes.size(); ++i)
@@ -49,9 +89,8 @@ struct GraphComponent :
 		grainsize = size;
 		edgefact = edge;
 
-
-		names = vector<vector<int>>(starts, vector<int>(num_vertices(g), -1));
-		//multireset(starts);
+		name = get(multi_name_t(), g);
+		multireset(starts);
 	}
 
 	void multival(vector<int> starts, bool sequential)
@@ -93,10 +132,12 @@ struct GraphComponent :
 			++loc;
 		}
 	}
-	static vector<int> process_layor_multi(int loc, vector<int> in_bag, MultiGraph* g, vector<int> *names)
+	static vector<int> process_layor_multi(int loc, vector<int> in_bag, MultiGraph* g)
 	{
 		property_map < MultiGraph, vertex_index_t >::type
 			index_map = get(vertex_index, *g);
+		property_map<MultiGraph, multi_name_t>::type
+			name = get(multi_name_t(), *g);
 		vector<int> out_bag;
 		int count = 0;
 		for (int i = 0; i < in_bag.size(); ++i)
@@ -107,9 +148,9 @@ struct GraphComponent :
 			for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
 			{
 				int ind = get(index_map, *ai);
-				if ((*names)[ind] >= 0)
+				if (name[ind][loc] >= 0)
 					continue;
-				(*names)[ind] = val;
+				name[ind][loc] = val;
 				out_bag.push_back(ind);
 			}
 		}
@@ -117,8 +158,7 @@ struct GraphComponent :
 	}
 	void mpbfs(int index, int loc)
 	{
-		names[loc][index] = index;
-		vector<int> * name = &names[loc];
+		name[index][loc] = index;
 		vector<int> v;
 		int dist = 0;
 		v.push_back(index);
@@ -134,14 +174,10 @@ struct GraphComponent :
 					int last = i;
 					i += grainsize;
 					if (i < v.size())
-						futures.push_back(hpx::async(hpx::util::bind(
-						&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr, name
-						)));
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr)));
 					else
 					{
-						futures.push_back(hpx::async(hpx::util::bind(
-							&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr, name
-							)));
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr)));
 						break;
 					}
 				}
@@ -155,6 +191,10 @@ struct GraphComponent :
 			}
 			v = children;
 		}
+	}
+	int getmultival(int index, int i)
+	{
+		return name[index][i];
 	}
 
 	void bfs_search_act(vector<int> starts)
@@ -171,7 +211,7 @@ struct GraphComponent :
 		property_map < MultiGraph, vertex_index_t >::type
 			index_map = get(vertex_index, g);
 		//pennants = std::vector <int>(num_vertices(g), -1);
-		names[loc][index] = index;
+		name[index][loc] = index;
 		vector<int> q;
 		q.reserve(num_vertices(g));
 		q.push_back(index);
@@ -187,9 +227,9 @@ struct GraphComponent :
 			for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
 			{
 				int ind = get(index_map, *ai);
-				if (names[loc][ind] < 0)
+				if (name[ind][loc] < 0)
 				{
-					names[loc][ind] = parent;
+					name[ind][loc] = parent;
 					q.push_back(ind);
 				}
 			}
@@ -207,14 +247,16 @@ struct GraphComponent :
 
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, setmulti, setmulti_action);
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, multival, multival_action);
+	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getmultival, getmultival_action);
 
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, bfs_search_act, bfs_search_action);
 
 	HPX_DEFINE_COMPONENT_ACTION(GraphComponent, getnum, num_vertices_action);
+	property_map<MultiGraph, multi_name_t>::type
+		name;
 	MultiGraph g;
 	int grainsize = 9999;
 	int edgefact = 16;
-	vector<vector<int>> names;
 	bool active = false;
 };
 
@@ -239,6 +281,9 @@ typedef GraphComponent::multival_action multival_action;
 HPX_REGISTER_ACTION_DECLARATION(multival_action);
 HPX_REGISTER_ACTION(multival_action);
 
+typedef GraphComponent::getmultival_action getmultival_action;
+HPX_REGISTER_ACTION_DECLARATION(getmultival_action);
+HPX_REGISTER_ACTION(getmultival_action);
 
 typedef GraphComponent::bfs_search_action bfs_search_action;
 HPX_REGISTER_ACTION_DECLARATION(bfs_search_action);
@@ -264,7 +309,7 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	}
 	int getval(int index, int i)
 	{
-		return hpx::async<getval_action>(this->get_gid(), index, i).get();
+		return hpx::async<getmultival_action>(this->get_gid(), index, i).get();
 	}
 	void setmulti(vector<vector<uint32_t>>& edges, int grainsize, int edgefact, int starts)
 	{
@@ -282,7 +327,7 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	int getmultival(int index, int i)
 	{
 
-		return hpx::async<getval_action>(this->get_gid(), index, i).get();
+		return hpx::async<getmultival_action>(this->get_gid(), index, i).get();
 	}
 	int getnum()
 	{
