@@ -182,7 +182,6 @@ struct GraphComponent :
 					}
 				}
 			}
-			//hpx::wait_all(futures.begin(), futures.end());
 			vector<int> children;
 			for (int i = 0; i < futures.size(); ++i)
 			{
@@ -203,7 +202,7 @@ struct GraphComponent :
 		for (int i = 0; i < starts.size(); ++i)
 		{
 			bfs_search(starts[i], i);
-		}
+        }
 	}
 
 	void bfs_search(int index, int loc)
@@ -234,7 +233,7 @@ struct GraphComponent :
 				}
 			}
 
-		}
+        }
 	};
 
 	int getnum()
@@ -259,7 +258,6 @@ struct GraphComponent :
 	int edgefact = 16;
 	bool active = false;
 };
-
 
 typedef managed_component<GraphComponent> server_type;
 HPX_REGISTER_MINIMAL_COMPONENT_FACTORY(server_type, GraphComponent);
@@ -320,7 +318,7 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 		hpx::async<multival_action>(this->get_gid(), starts, false).get();
 	}
 
-	void bfs_search(vector<int> starts)
+    void bfs_search(vector<int> starts)
 	{
 		hpx::async<bfs_search_action>(this->get_gid(), starts).get();
 	}
@@ -337,21 +335,249 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 
 };
 
+struct NonComponent
+{
+
+
+    static void parreset(MultiGraph* g, int start, int size, int toggled)
+    {
+        property_map<MultiGraph, multi_name_t>::type
+            name = get(multi_name_t(), *g);
+        for (int i = start; i < start + size; ++i)
+        {
+            name[i] = vector<int>(toggled, -1);
+        }
+    }
+
+    void reset(int toggled)
+    {
+        int adder = grainsize;
+
+        vector<hpx::future<void>> futs;
+        MultiGraph* ptr = &g;
+
+        for (int i = 0; i < num_vertices(g); i += adder)
+        {
+            if (i + adder < num_vertices(g))
+            {
+                futs.push_back(hpx::async(&parreset, ptr, i, adder, toggled));
+            }
+            else
+            {
+                futs.push_back(hpx::async(&parreset, ptr, i, num_vertices(g) - i, toggled));
+            }
+        }
+        hpx::wait_all(futs);
+
+    }
+    void set(vector<vector<uint32_t>> nodes, int size, int edge, int starts)
+    {
+        for (int i = 0; i < nodes.size(); ++i)
+        {
+            for (int j = 0; j < nodes[i].size(); ++j)
+                add_edge(i, nodes[i][j], g);
+        }
+        grainsize = size;
+        edgefact = edge;
+
+        name = get(multi_name_t(), g);
+        multireset(starts);
+    }
+    int getval(int i, int index)
+    {
+        return name[i][index];
+    }
+    void multireset(int starts)
+    {
+        for (int i = 0; i < num_vertices(g); ++i)
+        {
+            name[i] = vector<int>(starts, -1);
+        }
+    }
+
+    void setmulti(vector<vector<uint32_t>> nodes, int size, int edge, int starts)
+    {
+        for (int i = 0; i < nodes.size(); ++i)
+        {
+            for (int j = 0; j < nodes[i].size(); ++j)
+                add_edge(i, nodes[i][j], g);
+        }
+        grainsize = size;
+        edgefact = edge;
+
+        name = get(multi_name_t(), g);
+        multireset(starts);
+    }
+
+    void multival(vector<int> starts, bool sequential)
+    {
+        if (!sequential)
+        {
+            vector<hpx::future<void>> futures;
+            int i = 0;
+            int adder = 1;
+            for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
+            {
+                int last = i;
+                i += adder;
+                if (i < starts.size())
+                {
+                    futures.push_back(hpx::async(hpx::util::bind(&runMp, it, last, adder, this)));
+                }
+                else
+                {
+                    futures.push_back(hpx::async(hpx::util::bind(&runMp, it, last, starts.size() - last, this)));
+                    break;
+                }
+            }
+            hpx::wait_all(futures);
+        }
+        else
+        {
+            for (int i = 0; i < starts.size(); ++i)
+            {
+                mpbfs(starts[i], i);
+            }
+        }
+    }
+    static void runMp(vector<int>::iterator loc, int index, int size, NonComponent* gc)
+    {
+        for (int i = 0; i < size; ++i)
+        {
+            gc->mpbfs(*loc, index + i);
+            ++loc;
+        }
+    }
+    static vector<int> process_layor_multi(int loc, vector<int> in_bag, MultiGraph* g)
+    {
+        property_map < MultiGraph, vertex_index_t >::type
+            index_map = get(vertex_index, *g);
+        property_map<MultiGraph, multi_name_t>::type
+            name = get(multi_name_t(), *g);
+        vector<int> out_bag;
+        int count = 0;
+        for (int i = 0; i < in_bag.size(); ++i)
+        {
+            int val = in_bag[i];
+            graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
+
+            for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
+            {
+                int ind = get(index_map, *ai);
+                if (name[ind][loc] >= 0)
+                    continue;
+                name[ind][loc] = val;
+                out_bag.push_back(ind);
+            }
+        }
+        return out_bag;
+    }
+    void mpbfs(int index, int loc)
+    {
+        name[index][loc] = index;
+        vector<int> v;
+        int dist = 0;
+        v.push_back(index);
+        MultiGraph* ptr = &g;
+        while (!v.empty())
+        {
+            vector<hpx::future<vector<int>>> futures;
+            futures.reserve(v.size() / grainsize + 1);
+            {
+                int i = 0;
+                for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
+                {
+                    int last = i;
+                    i += grainsize;
+                    if (i < v.size())
+                        futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr)));
+                    else
+                    {
+                        futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr)));
+                        break;
+                    }
+                }
+            }
+            vector<int> children;
+            for (int i = 0; i < futures.size(); ++i)
+            {
+                vector<int> future = futures[i].get();
+                children.insert(children.end(), future.begin(), future.end());
+            }
+            v = children;
+        }
+    }
+    int getmultival(int index, int i)
+    {
+        return name[index][i];
+    }
+
+    void bfs_search_act(vector<int> starts)
+    {
+
+        for (int i = 0; i < starts.size(); ++i)
+        {
+            bfs_search(starts[i], i);
+        }
+    }
+
+    void bfs_search(int index, int loc)
+    {
+        property_map < MultiGraph, vertex_index_t >::type
+            index_map = get(vertex_index, g);
+        //pennants = std::vector <int>(num_vertices(g), -1);
+        name[index][loc] = index;
+        vector<int> q;
+        q.reserve(num_vertices(g));
+        q.push_back(index);
+        int dist = 0;
+        int spot = 0;
+        while (spot < q.size())
+        {
+            int ind = q[spot];
+            ++spot;
+            int parent = ind;
+            graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
+
+            for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
+            {
+                int ind = get(index_map, *ai);
+                if (name[ind][loc] < 0)
+                {
+                    name[ind][loc] = parent;
+                    q.push_back(ind);
+                }
+            }
+
+        }
+    };
+
+    int getnum()
+    {
+        return num_vertices(g);
+    }
+    property_map<MultiGraph, multi_name_t>::type
+        name;
+    MultiGraph g;
+    int grainsize = 9999;
+    int edgefact = 16;
+    bool active = false;
+};
 
 void parallel_edge_gen(vector<packed_edge>::iterator pedges, vector<vector<uint32_t>>* nodes, int size, vector<mutex_type*>* muts)
 {
 	for (int i = 0; i < size; ++i)
 	{
-		int v0 = pedges->v0_low;
-		int v1 = pedges->v1_low;
+        uint32_t v0 = pedges->v0_low;
+        uint32_t v1 = pedges->v1_low;
 		++pedges;
 		if (v0 == v1)
 			continue;
 		{
 			//undirected so no changes to final edgelist
-			if (v1 > v0)
+			if (v1 < v0)
 			{
-				int temp = v0;
+                uint32_t temp = v0;
 				v0 = v1;
 				v1 = v0;
 			}
@@ -396,7 +622,7 @@ int main()
 	boost::random::mt19937 rng;
 	boost::random::uniform_int_distribution<> randnodes(0, nnodes*ind);
 
-	uint64_t seed1 = 4, seed2 = 3;
+	uint64_t seed1 = 2, seed2 = 3;
 
 	uint_fast32_t seed;
 
@@ -441,6 +667,7 @@ int main()
 
 	vector<int> starts(searches);
 
+
 	vector<vector<pair<int, int>>> counts;
 	if (acctest != 0)
 	{
@@ -457,7 +684,13 @@ int main()
 		{
 			starts[j] = randnodes(rng);
 		}
-		hw.bfs_search(starts);
+
+        hw.bfs_search(starts);
+        //component error checking
+        NonComponent hw2;
+        hw2.set(nodes, grainsize, ind, starts.size());
+        hw2.bfs_search_act(starts);
+
 		for (int j = 0; j < starts.size(); ++j)
 		{
 			if (acctest != 0)
@@ -475,6 +708,7 @@ int main()
 						if (sample == -1)
 						{
 							count = -1;
+                            cout << "Degenerate vertex in sample " << j << "-" << i << endl;
 							break;
 						}
 						//cout << sample << "-" << sub.pennants[sample].dist << " ";
@@ -483,6 +717,27 @@ int main()
 					counts[j][i].second = count;
 					//cout << endl;
 				}
+
+                for (int i = 0; i < counts[j].size(); ++i)
+                {
+                    int sample = counts[j][i].first;
+                    int count = 0;
+                    while (sample != starts[j])
+                    {
+                        count++;
+                        if (sample == -1)
+                        {
+                            count = -1;
+                            cout << "Degenerate vertex in sample " << j << "-" << i << endl;
+                            break;
+                        }
+                        //cout << sample << "-" << sub.pennants[sample].dist << " ";
+                        sample = hw2.getmultival(sample, j);
+                    }
+                    if (counts[j][i].second != count)
+                        cout << "Serial component != serial noncomponent: " << counts[j][i].second << " != " << count << endl;
+                    //cout << endl;
+                }
 			}
 		}
 	}
