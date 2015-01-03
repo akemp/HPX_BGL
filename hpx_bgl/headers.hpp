@@ -25,7 +25,7 @@
 #include <boost/graph/breadth_first_search.hpp>
 
 
-typedef std::pair < uint32_t, uint32_t > Edge;
+typedef std::pair < int, int > Edge;
 typedef std::vector<Edge> Edges;
 
 struct multi_name_t {
