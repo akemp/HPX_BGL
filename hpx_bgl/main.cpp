@@ -335,90 +335,6 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 
 };
 
-struct NonComponent
-{
-
-    void set(vector<vector<int>> nodes, int size, int edge, int starts)
-    {
-        for (int i = 0; i < nodes.size(); ++i)
-        {
-            for (int j = 0; j < nodes[i].size(); ++j)
-                add_edge(i, nodes[i][j], g);
-        }
-        grainsize = size;
-        edgefact = edge;
-
-        name = get(multi_name_t(), g);
-        multireset(starts);
-    }
-
-    int getval(int i, int index)
-    {
-        return name[i][index];
-    }
-    void multireset(int starts)
-    {
-        for (int i = 0; i < num_vertices(g); ++i)
-        {
-            name[i] = vector<int>(starts, -1);
-        }
-    }
-    int getmultival(int index, int i)
-    {
-        return name[index][i];
-    }
-
-    void bfs_search_act(vector<int> starts)
-    {
-
-        for (int i = 0; i < starts.size(); ++i)
-        {
-            bfs_search(starts[i], i);
-        }
-    }
-
-    void bfs_search(int index, int loc)
-    {
-        property_map < MultiGraph, vertex_index_t >::type
-            index_map = get(vertex_index, g);
-        //pennants = std::vector <int>(num_vertices(g), -1);
-        name[index][loc] = index;
-        vector<int> q;
-        q.reserve(num_vertices(g));
-        q.push_back(index);
-        int spot = 0;
-        while (spot < q.size())
-        {
-            int ind = q[spot];
-            ++spot;
-            int parent = ind;
-            graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
-
-            for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
-            {
-                int ind = get(index_map, *ai);
-                if (name[ind][loc] < 0)
-                {
-                    name[ind][loc] = parent;
-                    q.push_back(ind);
-                }
-            }
-
-        }
-    };
-
-    int getnum()
-    {
-        return num_vertices(g);
-    }
-    property_map<MultiGraph, multi_name_t>::type
-        name;
-    MultiGraph g;
-    int grainsize = 9999;
-    int edgefact = 16;
-    bool active = false;
-};
-
 void parallel_edge_gen(vector<packed_edge>::iterator pedges, vector<vector<int>>* nodes, int size, vector<mutex_type*>* muts)
 {
 
@@ -545,12 +461,10 @@ int main()
 			starts[j] = randnodes(rng);
 		}
 
+        hpx::util::high_resolution_timer t1;
         hw.bfs_search(starts);
-        //component error checking
-        NonComponent hw2;
-        hw2.set(nodes, grainsize, ind, starts.size());
-        hw2.bfs_search_act(starts);
-
+        double elapsed1 = t1.elapsed();
+        cout << elapsed1 << "s search time for serial\n";
 		for (int j = 0; j < starts.size(); ++j)
 		{
 			//sub.reset();
@@ -575,26 +489,6 @@ int main()
 				counts[j][i].second = count;
 				//cout << endl;
 			}
-
-            for (int i = 0; i < counts[j].size(); ++i)
-            {
-                int sample = counts[j][i].first;
-                int count = 0;
-                while (sample != starts[j])
-                {
-                    count++;
-                    if (sample == -1)
-                    {
-                        count = -1;
-                        break;
-                    }
-                    //cout << sample << "-" << sub.pennants[sample].dist << " ";
-                    sample = hw2.getmultival(sample, j);
-                }
-                if (counts[j][i].second != count)
-                    cout << "Serial component != serial noncomponent: " << counts[j][i].second << " != " << count << endl;
-                //cout << endl;
-            }
 		}
 	}
 	if (acctest != 0)

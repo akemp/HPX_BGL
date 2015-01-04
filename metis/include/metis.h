@@ -86,7 +86,7 @@ typedef __int64 int64_t;
 * Setup the basic datatypes
 *-------------------------------------------------------------------------*/
 #if IDXTYPEWIDTH == 32
-  typedef int32_t idx_t;
+  typedef int idx_t;
 
   #define IDX_MAX   INT32_MAX
   #define IDX_MIN   INT32_MIN

@@ -39,4 +39,5 @@ typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
 int get_parts(std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy, std::vector<idx_t> &part,
 	idx_t nparts);
 void toCSR(const std::vector<std::vector<idx_t>>& nodes, std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy);
+
 #endif
