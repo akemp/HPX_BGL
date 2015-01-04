@@ -445,11 +445,9 @@ int main()
 
 
 	vector<vector<pair<int, int>>> counts;
-	if (acctest != 0)
-	{
-		cout << "Setting up serial values for testing.\n";
-		counts = vector<vector<pair<int, int>>>(starts.size(), vector<pair<int, int>>(64, pair<int, int>(-1, 0)));
-	}
+	cout << "Setting up serial values for testing.\n";
+	counts = vector<vector<pair<int, int>>>(starts.size(), vector<pair<int, int>>(64, pair<int, int>(-1, 0)));
+	cout << "Data structures set. Running serial search.\n";
 	int nverts;
 	{
 		graph_manager hw = graph_manager::create(hpx::find_here());
@@ -467,8 +465,6 @@ int main()
         cout << elapsed1 << "s search time for serial\n";
 		for (int j = 0; j < starts.size(); ++j)
 		{
-			//sub.reset();
-			//sub.bfs_search(starts[j]);
 			for (int i = 0; i < counts[j].size(); ++i)
 			{
 				int sample = randnodes(rng);
