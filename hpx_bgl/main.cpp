@@ -54,7 +54,7 @@ struct GraphComponent :
 		hpx::wait_all(futs);
 
 	}
-	void set(vector<vector<uint32_t>> nodes, int size, int edge, int starts)
+	void set(vector<vector<int>> nodes, int size, int edge, int starts)
 	{
 		for (int i = 0; i < nodes.size(); ++i)
 		{
@@ -79,7 +79,7 @@ struct GraphComponent :
 		}
 	}
 
-	void setmulti(vector<vector<uint32_t>> nodes, int size, int edge, int starts)
+	void setmulti(vector<vector<int>> nodes, int size, int edge, int starts)
 	{
 		for (int i = 0; i < nodes.size(); ++i)
 		{
@@ -182,7 +182,6 @@ struct GraphComponent :
 					}
 				}
 			}
-			//hpx::wait_all(futures.begin(), futures.end());
 			vector<int> children;
 			for (int i = 0; i < futures.size(); ++i)
 			{
@@ -203,7 +202,7 @@ struct GraphComponent :
 		for (int i = 0; i < starts.size(); ++i)
 		{
 			bfs_search(starts[i], i);
-		}
+        }
 	}
 
 	void bfs_search(int index, int loc)
@@ -234,7 +233,7 @@ struct GraphComponent :
 				}
 			}
 
-		}
+        }
 	};
 
 	int getnum()
@@ -259,7 +258,6 @@ struct GraphComponent :
 	int edgefact = 16;
 	bool active = false;
 };
-
 
 typedef managed_component<GraphComponent> server_type;
 HPX_REGISTER_MINIMAL_COMPONENT_FACTORY(server_type, GraphComponent);
@@ -303,7 +301,7 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	{
 		hpx::async<multival_action>(this->get_gid(), index, true).get();
 	}
-	void set(vector<vector<uint32_t>>& edges, int grainsize, int edgefact, int starts)
+	void set(vector<vector<int>>& edges, int grainsize, int edgefact, int starts)
 	{
 		hpx::async<set_action>(this->get_gid(), edges, grainsize, edgefact, starts).get();
 	}
@@ -311,7 +309,7 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	{
 		return hpx::async<getmultival_action>(this->get_gid(), index, i).get();
 	}
-	void setmulti(vector<vector<uint32_t>>& edges, int grainsize, int edgefact, int starts)
+	void setmulti(vector<vector<int>>& edges, int grainsize, int edgefact, int starts)
 	{
 		hpx::async<setmulti_action>(this->get_gid(), edges, grainsize, edgefact, starts).get();
 	}
@@ -320,7 +318,7 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 		hpx::async<multival_action>(this->get_gid(), starts, false).get();
 	}
 
-	void bfs_search(vector<int> starts)
+    void bfs_search(vector<int> starts)
 	{
 		hpx::async<bfs_search_action>(this->get_gid(), starts).get();
 	}
@@ -337,23 +335,110 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 
 };
 
-
-void parallel_edge_gen(vector<packed_edge>::iterator pedges, vector<vector<uint32_t>>* nodes, int size, vector<mutex_type*>* muts)
+struct NonComponent
 {
+
+    void set(vector<vector<int>> nodes, int size, int edge, int starts)
+    {
+        for (int i = 0; i < nodes.size(); ++i)
+        {
+            for (int j = 0; j < nodes[i].size(); ++j)
+                add_edge(i, nodes[i][j], g);
+        }
+        grainsize = size;
+        edgefact = edge;
+
+        name = get(multi_name_t(), g);
+        multireset(starts);
+    }
+
+    int getval(int i, int index)
+    {
+        return name[i][index];
+    }
+    void multireset(int starts)
+    {
+        for (int i = 0; i < num_vertices(g); ++i)
+        {
+            name[i] = vector<int>(starts, -1);
+        }
+    }
+    int getmultival(int index, int i)
+    {
+        return name[index][i];
+    }
+
+    void bfs_search_act(vector<int> starts)
+    {
+
+        for (int i = 0; i < starts.size(); ++i)
+        {
+            bfs_search(starts[i], i);
+        }
+    }
+
+    void bfs_search(int index, int loc)
+    {
+        property_map < MultiGraph, vertex_index_t >::type
+            index_map = get(vertex_index, g);
+        //pennants = std::vector <int>(num_vertices(g), -1);
+        name[index][loc] = index;
+        vector<int> q;
+        q.reserve(num_vertices(g));
+        q.push_back(index);
+        int spot = 0;
+        while (spot < q.size())
+        {
+            int ind = q[spot];
+            ++spot;
+            int parent = ind;
+            graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
+
+            for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
+            {
+                int ind = get(index_map, *ai);
+                if (name[ind][loc] < 0)
+                {
+                    name[ind][loc] = parent;
+                    q.push_back(ind);
+                }
+            }
+
+        }
+    };
+
+    int getnum()
+    {
+        return num_vertices(g);
+    }
+    property_map<MultiGraph, multi_name_t>::type
+        name;
+    MultiGraph g;
+    int grainsize = 9999;
+    int edgefact = 16;
+    bool active = false;
+};
+
+void parallel_edge_gen(vector<packed_edge>::iterator pedges, vector<vector<int>>* nodes, int size, vector<mutex_type*>* muts)
+{
+
+    boost::random::mt19937 rng;
+    boost::random::uniform_int_distribution<> randnodes(0, nodes->size()-1);
+    rng.seed(pedges->v0_low);
 	for (int i = 0; i < size; ++i)
 	{
-		int v0 = pedges->v0_low;
-		int v1 = pedges->v1_low;
-		++pedges;
+        int v0 = randnodes(rng);//pedges->v0_low;
+        int v1 = randnodes(rng);//pedges->v1_low;
+        ++pedges;
 		if (v0 == v1)
 			continue;
 		{
 			//undirected so no changes to final edgelist
-			if (v1 > v0)
+			if (v1 < v0)
 			{
-				int temp = v0;
+                int temp = v0;
 				v0 = v1;
-				v1 = v0;
+				v1 = temp;
 			}
 			mutex_type::scoped_lock l1(*(*muts)[v0]);
 			if (std::find((*nodes)[v0].begin(), (*nodes)[v0].end(), v1) != (*nodes)[v0].end())
@@ -370,13 +455,13 @@ int main()
 	using namespace std;
 	cout << "threads: " << hpx::get_os_thread_count() << endl;
 
-	int nnodes;
-	int scale;
+    uint64_t nnodes;
+    uint64_t scale;
 	cout << "Enter scale (nodes=2^input): ";
 	cin >> scale;
-	int ind;
-	cout << "Enter edges per node: ";
-	cin >> ind;
+    uint64_t edgefactor;
+	cout << "Enter edgefactor: ";
+    cin >> edgefactor;
 	int grainsize;
 #ifdef CUSTOMGRAIN
 	cout << "Enter grainsize: ";
@@ -391,19 +476,18 @@ int main()
 	int acctest = 1;
 	//cout << "Run accuracy tests (0 for no, 1 for yes)?";
 	//cin >> acctest;
-	nnodes = pow(2, scale);
+    nnodes = (uint64_t)(1) << scale;
 	//
 	boost::random::mt19937 rng;
-	boost::random::uniform_int_distribution<> randnodes(0, nnodes*ind);
+	boost::random::uniform_int_distribution<> randnodes(0, nnodes*edgefactor);
 
-	uint64_t seed1 = 4, seed2 = 3;
+	uint64_t seed1 = 2, seed2 = 3;
+    uint_fast32_t seed[5];
 
-	uint_fast32_t seed;
-
-	make_mrg_seed(seed1, seed2, &seed);
+	make_mrg_seed(seed1, seed2, seed);
 
 	//Edges edges;
-	vector<vector<uint32_t>> nodes(
+	vector<vector<int>> nodes(
 		nnodes
 		);
 	vector<mutex_type*> muts(nodes.size());
@@ -411,10 +495,12 @@ int main()
 	{
 		muts[i] = new mutex_type;
 	}
-	vector<packed_edge> pedges(nnodes*ind);
-	generate_kronecker_range(&seed, scale, 0, pedges.size(), &pedges.front());
+    uint64_t ind = (uint64_t)(edgefactor) << scale;
+	vector<packed_edge> pedges(ind);
+    generate_kronecker_range(seed, scale, 0, (uint64_t)pedges.size(), &pedges.front());
 	cout << "Kronecker range generated. Making edgelist.\n";
 	{
+
 		vector<hpx::thread> edgefuts;
 		int addsize = grainsize * 16;
 		for (int i = 0; i < pedges.size(); i += addsize)
@@ -441,6 +527,7 @@ int main()
 
 	vector<int> starts(searches);
 
+
 	vector<vector<pair<int, int>>> counts;
 	if (acctest != 0)
 	{
@@ -457,33 +544,57 @@ int main()
 		{
 			starts[j] = randnodes(rng);
 		}
-		hw.bfs_search(starts);
+
+        hw.bfs_search(starts);
+        //component error checking
+        NonComponent hw2;
+        hw2.set(nodes, grainsize, ind, starts.size());
+        hw2.bfs_search_act(starts);
+
 		for (int j = 0; j < starts.size(); ++j)
 		{
-			if (acctest != 0)
+			//sub.reset();
+			//sub.bfs_search(starts[j]);
+			for (int i = 0; i < counts[j].size(); ++i)
 			{
-				//sub.reset();
-				//sub.bfs_search(starts[j]);
-				for (int i = 0; i < counts[j].size(); ++i)
+				int sample = randnodes(rng);
+				counts[j][i].first = sample;
+				int count = 0;
+				while (sample != starts[j])
 				{
-					int sample = randnodes(rng);
-					counts[j][i].first = sample;
-					int count = 0;
-					while (sample != starts[j])
+					count++;
+					if (sample == -1)
 					{
-						count++;
-						if (sample == -1)
-						{
-							count = -1;
-							break;
-						}
-						//cout << sample << "-" << sub.pennants[sample].dist << " ";
-						sample = hw.getmultival(sample, j);
+						count = -1;
+                        cout << "Degenerate vertex in sample " << j << "-" << i << endl;
+						break;
 					}
-					counts[j][i].second = count;
-					//cout << endl;
+					//cout << sample << "-" << sub.pennants[sample].dist << " ";
+					sample = hw.getmultival(sample, j);
 				}
+				counts[j][i].second = count;
+				//cout << endl;
 			}
+
+            for (int i = 0; i < counts[j].size(); ++i)
+            {
+                int sample = counts[j][i].first;
+                int count = 0;
+                while (sample != starts[j])
+                {
+                    count++;
+                    if (sample == -1)
+                    {
+                        count = -1;
+                        break;
+                    }
+                    //cout << sample << "-" << sub.pennants[sample].dist << " ";
+                    sample = hw2.getmultival(sample, j);
+                }
+                if (counts[j][i].second != count)
+                    cout << "Serial component != serial noncomponent: " << counts[j][i].second << " != " << count << endl;
+                //cout << endl;
+            }
 		}
 	}
 	if (acctest != 0)
