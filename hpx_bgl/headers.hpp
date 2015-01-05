@@ -25,7 +25,6 @@ struct multi_name_t {
 
 typedef boost::property<multi_name_t, std::vector<int> > MultiColor; //parent, color, partition, distance
 typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
-	MultiColor> MultiGraph;
-
+	MultiColor> Graph;
 
 #endif

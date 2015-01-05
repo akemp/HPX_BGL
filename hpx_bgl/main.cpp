@@ -8,12 +8,12 @@ typedef std::mutex mutex_type;
 
 using namespace boost;
 using namespace std;
+
 struct GraphComponent
 {
-
-	static void parreset(MultiGraph* g, int start, int size, int toggled)
+	static void parreset(Graph* g, int start, int size, int toggled)
 	{
-		property_map<MultiGraph, multi_name_t>::type
+		property_map<Graph, multi_name_t>::type
 			name = get(multi_name_t(), *g);
 		for (int i = start; i < start + size; ++i)
 		{
@@ -26,7 +26,7 @@ struct GraphComponent
 		int adder = grainsize;
 
 		vector<std::thread> futs;
-		MultiGraph* ptr = &g;
+		Graph* ptr = &g;
 
 		for (int i = 0; i < num_vertices(g); i += adder)
 		{
@@ -122,18 +122,18 @@ struct GraphComponent
 			++loc;
 		}
 	}
-	static vector<int> process_layor_multi(int loc, vector<int> in_bag, MultiGraph* g)
+	static vector<int> process_layor_multi(int loc, vector<int> in_bag, Graph* g)
 	{
-		property_map < MultiGraph, vertex_index_t >::type
+		property_map < Graph, vertex_index_t >::type
 			index_map = get(vertex_index, *g);
-		property_map<MultiGraph, multi_name_t>::type
+		property_map<Graph, multi_name_t>::type
 			name = get(multi_name_t(), *g);
 		vector<int> out_bag;
 		int count = 0;
 		for (int i = 0; i < in_bag.size(); ++i)
 		{
 			int val = in_bag[i];
-			graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
+			graph_traits < Graph >::adjacency_iterator ai, a_end;
 
 			for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
 			{
@@ -152,7 +152,7 @@ struct GraphComponent
 		vector<int> v;
 		int dist = 0;
 		v.push_back(index);
-		MultiGraph* ptr = &g;
+		Graph* ptr = &g;
 		while (!v.empty())
 		{
 			vector<std::future<vector<int>>> futures;
@@ -197,7 +197,7 @@ struct GraphComponent
 
 	void bfs_search(int index, int loc)
 	{
-		property_map < MultiGraph, vertex_index_t >::type
+		property_map < Graph, vertex_index_t >::type
 			index_map = get(vertex_index, g);
 		//pennants = std::vector <int>(num_vertices(g), -1);
 		name[index][loc] = index;
@@ -211,7 +211,7 @@ struct GraphComponent
 			int ind = q[spot];
 			++spot;
 			int parent = ind;
-			graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
+			graph_traits < Graph >::adjacency_iterator ai, a_end;
 
 			for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
 			{
@@ -231,9 +231,9 @@ struct GraphComponent
 		return num_vertices(g);
 	}
 
-	property_map<MultiGraph, multi_name_t>::type
+	property_map<Graph, multi_name_t>::type
 		name;
-	MultiGraph g;
+	Graph g;
 	int grainsize = 9999;
 	int edgefact = 16;
 	bool active = false;
