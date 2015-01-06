@@ -369,28 +369,31 @@ int main()
 {
 
 	using namespace std;
-	cout << "threads: " << hpx::get_os_thread_count() << endl;
+	ofstream fout("out.txt", std::ios_base::app);
+	//fout << "threads: " << hpx::get_os_thread_count() << endl;
 
     uint64_t nnodes;
-    uint64_t scale;
-	cout << "Enter scale (nodes=2^input): ";
-	cin >> scale;
-    uint64_t edgefactor;
-	cout << "Enter edgefactor: ";
-    cin >> edgefactor;
+    uint64_t scale = 16;
+	//fout << "Enter scale (nodes=2^input): ";
+	//cin >> scale;
+	//fout << scale << endl;
+    uint64_t edgefactor = 16;
+	//fout << "Enter edgefactor: ";
+    //cin >> edgefactor;
+	//fout << edgefactor << endl;
 	int grainsize;
 #ifdef CUSTOMGRAIN
-	cout << "Enter grainsize: ";
+	//fout << "Enter grainsize: ";
 	cin >> grainsize;
 #else
 	grainsize = 128;
 #endif
 
-	int searches;
-	cout << "Enter searches: ";
-	cin >> searches;
+	int searches = 64;
+	//fout << "Enter searches: ";
+	//fout << searches << endl;
 	int acctest = 1;
-	//cout << "Run accuracy tests (0 for no, 1 for yes)?";
+	////fout << "Run accuracy tests (0 for no, 1 for yes)?";
 	//cin >> acctest;
     nnodes = (uint64_t)(1) << scale;
 	//
@@ -414,7 +417,7 @@ int main()
     uint64_t ind = (uint64_t)(edgefactor) << scale;
 	vector<packed_edge> pedges(ind);
     generate_kronecker_range(seed, scale, 0, (uint64_t)pedges.size(), &pedges.front());
-	cout << "Kronecker range generated. Making edgelist.\n";
+	//fout << "Kronecker range generated. Making edgelist.\n";
 	{
 
 		vector<hpx::thread> edgefuts;
@@ -438,7 +441,7 @@ int main()
 		for (int i = 0; i < edgefuts.size(); ++i)
 			edgefuts[i].join();
 	}
-	cout << "Edgelist generated. Running tests.\n";
+	//fout << "Edgelist generated. Running tests.\n";
 
 
 	vector<int> starts(searches);
@@ -447,7 +450,7 @@ int main()
 	vector<vector<pair<int, int>>> counts;
 	if (acctest != 0)
 	{
-		cout << "Setting up serial values for testing.\n";
+		//fout << "Setting up serial values for testing.\n";
 		counts = vector<vector<pair<int, int>>>(starts.size(), vector<pair<int, int>>(64, pair<int, int>(-1, 0)));
 	}
 	int nverts;
@@ -464,7 +467,7 @@ int main()
         hpx::util::high_resolution_timer t1;
         hw.bfs_search(starts);
         double elapsed1 = t1.elapsed();
-        cout << elapsed1 << "s search time for serial\n";
+        //fout << elapsed1 << "s search time for serial\n";
 		for (int j = 0; j < starts.size(); ++j)
 		{
 			//sub.reset();
@@ -480,20 +483,20 @@ int main()
 					if (sample == -1)
 					{
 						count = -1;
-                        cout << "Degenerate vertex in sample " << j << "-" << i << endl;
+                        //fout << "Degenerate vertex in sample " << j << "-" << i << endl;
 						break;
 					}
-					//cout << sample << "-" << sub.pennants[sample].dist << " ";
+					////fout << sample << "-" << sub.pennants[sample].dist << " ";
 					sample = hw.getmultival(sample, j);
 				}
 				counts[j][i].second = count;
-				//cout << endl;
+				////fout << endl;
 			}
 		}
 	}
 	if (acctest != 0)
 	{
-		cout << "Running accuracy tests.\n";
+		//fout << "Running accuracy tests.\n";
 		
 
 		{
@@ -505,8 +508,9 @@ int main()
 		  hw.pbfs_search(starts);
 		  double elapsed = t.elapsed();
 		  double elapsed1 = t1.elapsed();
-		  cout << elapsed << "s for parallel component\n";
-		  cout << elapsed1 << "s search time for parallel component\n";
+		  double teps = (64.0*ind) / elapsed1;
+		  //fout << elapsed << "s for parallel component\n";
+		  fout << teps << "\t";// << "s search time for parallel component\n";
 		  for (int j = 0; j < starts.size(); ++j)
 		  {
 		  
@@ -522,12 +526,12 @@ int main()
 						  count = -1;
 						  break;
 					  }
-					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+					  ////fout << sample << "-" << sub.pennants[sample].dist << " ";
 					  sample = hw.getval(sample,j);
 				  }
-				  if (counts[j][i].second != count)
-					  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
-				  //cout << endl;
+				  //if (counts[j][i].second != count)
+					  //fout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+				  ////fout << endl;
 			  }
 
 		  }
@@ -542,8 +546,9 @@ int main()
 
 		  double elapsed1 = t1.elapsed();
 		  double elapsed = t.elapsed();
-		  cout << elapsed << "s for highly parallel\n";
-		  cout << elapsed1 << "s search time for highly parallel\n";
+		  double teps = (64.0*ind) / elapsed1;
+		  //fout << elapsed << "s for highly parallel\n";
+		  fout << teps << "\t";// << "s search time for highly parallel\n";
 
 		  for (int j = 0; j < starts.size(); ++j)
 		  {
@@ -559,19 +564,19 @@ int main()
 						  count = -1;
 						  break;
 					  }
-					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
+					  ////fout << sample << "-" << sub.pennants[sample].dist << " ";
 					  sample = hw.getmultival(sample, j);
 				  }
-				  if (counts[j][i].second != count)
-					  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
-				  //cout << endl;
+				  //if (counts[j][i].second != count)
+					  //fout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+				  ////fout << endl;
 			  }
 		  }
 	  }
 
-		cout << "Accuracy tests complete.\n";
+		//fout << "Accuracy tests complete.\n";
 	}
-	cout << "Serial comparison:\n";
+	//fout << "Serial comparison:\n";
 	{
 		hpx::util::high_resolution_timer t;
 		t.restart();
@@ -584,11 +589,13 @@ int main()
 		}
 		double elapsed = t.elapsed();
 		double elapsed1 = t1.elapsed();
-		cout << elapsed << "s for serial\n";
-		cout << elapsed1 << "s search time for serial\n";
+		//fout << elapsed << "s for serial\n";
+		double teps = (64.0*ind) / elapsed1;
+		fout << teps << endl;// << "s search time for serial\n";
 	}
 
 	int s;
-	cin >> s;
+	//cin >> s;
+	fout.close();
 	return 0;
 }
