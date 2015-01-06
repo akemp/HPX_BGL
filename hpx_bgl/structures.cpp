@@ -36,3 +36,30 @@ void toCSR(const std::vector<std::vector<idx_t>>& nodes, std::vector<idx_t>& xad
 	}
 	return;
 }
+
+void parallel_edge_gen(vector<int>::iterator pedges, vector<vector<int>>* nodes, int size)
+{
+
+	boost::random::mt19937 rng;
+	boost::random::uniform_int_distribution<> randnodes(0, nodes->size() - 1);
+	rng.seed(*pedges);
+	for (int i = 0; i < size; ++i)
+	{
+		int v0 = randnodes(rng);//pedges->v0_low;
+		int v1 = randnodes(rng);//pedges->v1_low;
+		if (v0 == v1)
+			continue;
+		{
+			//undirected so no changes to final edgelist
+			if (v1 < v0)
+			{
+				int temp = v0;
+				v0 = v1;
+				v1 = temp;
+			}
+			if (std::find((*nodes)[v0].begin(), (*nodes)[v0].end(), v1) != (*nodes)[v0].end())
+				continue;
+			(*nodes)[v0].push_back(v1);
+		}
+	}
+}
