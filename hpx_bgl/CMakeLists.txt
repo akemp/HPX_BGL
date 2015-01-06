@@ -6,3 +6,5 @@ set (sources
 )
      
 add_executable(hpx_bgl ${sources})
+
+target_link_libraries(hpx_bgl metis)

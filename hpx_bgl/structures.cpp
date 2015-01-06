@@ -3,9 +3,8 @@
 //  Distributed under the Boost Software License, Version 1.0. (See accompanying
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
-#define NO_HPX
 #include "headers.hpp"
-/*
+
 int get_parts(std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy, std::vector<idx_t> &part,
 	idx_t nparts)
 {
@@ -37,4 +36,3 @@ void toCSR(const std::vector<std::vector<idx_t>>& nodes, std::vector<idx_t>& xad
 	}
 	return;
 }
-*/

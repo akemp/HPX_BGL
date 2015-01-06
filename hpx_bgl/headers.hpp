@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>         // std::thread
 #include <future>
+#include "../metis/include/metis.h"
 
 #include <boost/random.hpp>
 #include <boost/format.hpp>
