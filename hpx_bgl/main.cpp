@@ -311,7 +311,7 @@ struct graph_manager : client_base<graph_manager, GraphComponent>
 	}
 	void setmulti(vector<vector<int>>& edges, int grainsize, int edgefact, int starts)
 	{
-		hpx::async<setmulti_action>(this->get_gid(), edges, grainsize, edgefact, starts).get();
+		hpx::async<set_action>(this->get_gid(), edges, grainsize, edgefact, starts).get();
 	}
 	void multival(vector<int> starts)
 	{
