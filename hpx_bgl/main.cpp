@@ -8,6 +8,105 @@
 struct SubGraph
 {
 
+	void multival(vector<int> starts, bool sequential)
+	{
+		if (!sequential)
+		{
+			vector<std::thread> futures;
+			int i = 0;
+			int adder = 1;
+			for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
+			{
+				int last = i;
+				i += adder;
+				if (i < starts.size())
+				{
+					futures.push_back(std::thread(&runMp, it, last, adder, this));
+				}
+				else
+				{
+					futures.push_back(std::thread(&runMp, it, last, starts.size() - last, this));
+					break;
+				}
+			}
+			for (int i = 0; i < futures.size(); ++i)
+				futures[i].join();
+		}
+		else
+		{
+			for (int i = 0; i < starts.size(); ++i)
+			{
+				mpbfs(starts[i], i);
+			}
+		}
+	}
+	static void runMp(vector<int>::iterator loc, int index, int size, SubGraph* gc)
+	{
+		for (int i = 0; i < size; ++i)
+		{
+			gc->mpbfs(*loc, index + i);
+			++loc;
+		}
+	}
+	static vector<int> process_layor_multi(int loc, vector<int> in_bag, Graph* g)
+	{
+		property_map < Graph, vertex_index_t >::type
+			index_map = get(vertex_index, *g);
+		property_map<Graph, multi_name_t>::type
+			name = get(multi_name_t(), *g);
+		vector<int> out_bag;
+		int count = 0;
+		for (int i = 0; i < in_bag.size(); ++i)
+		{
+			int val = in_bag[i];
+			graph_traits < Graph >::adjacency_iterator ai, a_end;
+
+			for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
+			{
+				int ind = get(index_map, *ai);
+				if (name[ind][loc] >= 0)
+					continue;
+				name[ind][loc] = val;
+				out_bag.push_back(ind);
+			}
+		}
+		return out_bag;
+	}
+	void mpbfs(int index, int loc)
+	{
+		name[index][loc] = index;
+		vector<int> v;
+		int dist = 0;
+		v.push_back(index);
+		Graph* ptr = &g;
+		while (!v.empty())
+		{
+			vector<std::future<vector<int>>> futures;
+			futures.reserve(v.size() / grainsize + 1);
+			{
+				int i = 0;
+				for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
+				{
+					int last = i;
+					i += grainsize;
+					if (i < v.size())
+						futures.push_back(std::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr)));
+					else
+					{
+						futures.push_back(std::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr)));
+						break;
+					}
+				}
+			}
+			vector<int> children;
+			for (int i = 0; i < futures.size(); ++i)
+			{
+				vector<int> future = futures[i].get();
+				children.insert(children.end(), future.begin(), future.end());
+			}
+			v = children;
+		}
+	}
 	static void parreset(Graph* g, int start, int size, int toggled)
 	{
 		property_map<Graph, multi_name_t>::type
@@ -39,8 +138,8 @@ struct SubGraph
 		for (int i = 0; i < futs.size(); ++i)
 			futs[i].join();
 
-	}//graphs[i].set(nodes, size, edge, starts, nparts, vertexmap, i, neighbors);
-	
+	}
+
 	int getval(int i, int index)
 	{
 		return name[i][index];
@@ -56,10 +155,15 @@ struct SubGraph
 	void set(vector<vector<int>> nodes, int size, int edge, int starts, int index, vector<int> map, vector<SubGraph*> n)
 	{
 		part = index;
+		parts = map;
 		for (int i = 0; i < nodes.size(); ++i)
 		{
 			for (int j = 0; j < nodes[i].size(); ++j)
-				add_edge(i, nodes[i][j], g);
+			{
+				int val = nodes[i][j];
+				//if (parts[i] == part || parts[val] == part)
+				add_edge(i, val, g);
+			}
 		}
 		grainsize = size;
 		edgefact = edge;
@@ -67,7 +171,6 @@ struct SubGraph
 		name = get(multi_name_t(), g);
 		dists = vector<vector<int>>(num_vertices(g),vector<int>(starts, 999999999));
 		multireset(starts);
-		parts = map;
 		neighbors = n;
 	}
 
@@ -87,11 +190,13 @@ struct SubGraph
 		//pennants = std::vector <int>(num_vertices(g), -1);
 		if (dist >= dists[index][loc])
 			return;
+		//dists[parent][loc] = 0;
 		name[index][loc] = parent;
 		dists[index][loc] = dist;
 		vector<int> q;
 		q.push_back(index);
 		int spot = 0;
+		vector<thread> threads;
 		while (spot < q.size())
 		{
 			int ind = q[spot];
@@ -100,7 +205,7 @@ struct SubGraph
 			if (sampart != part)
 			{
 				int temp = name[ind][loc];
-				bfs_partition(ind, loc, neighbors[sampart], temp, dists[ind][loc]);
+				threads.push_back(thread(&bfs_partition,ind, loc, neighbors[sampart], temp, dists[ind][loc]));
 				continue;
 			}
 			parent = ind;
@@ -119,6 +224,8 @@ struct SubGraph
 			}
 
 		}
+		for (int i = 0; i < threads.size(); ++i)
+			threads[i].join();
 	};
 
 	int getnum()
@@ -156,14 +263,22 @@ struct MultiComponent
 			graphs[i].set(nodes, size, edge, starts, i, vertexmap, neighbors);
 		}
 	};
+	static void search_act(int start, int i, SubGraph* g)
+	{
+		g->bfs_search(start, i, start, 0);
+	}
 	void search(vector<int> starts)
 	{
+		vector<thread> threads;
 		for (int i = 0; i < starts.size(); ++i)
 		{
 			int start = starts[i];
 			int partition = vertexmap[start];
-			graphs[partition].bfs_search(start, i, start, 0);
+			//graphs[partition].bfs_search(start, i, start, 0);
+			threads.push_back(thread(&search_act, start, i, &graphs[partition]));
 		}
+		for (int i = 0; i < threads.size(); ++i)
+			threads[i].join();
 	}
 	int getmultival(int index, int i)
 	{
@@ -207,6 +322,9 @@ int main()
 	//cin >> acctest;
     nnodes = (uint64_t)(1) << scale;
 	//
+	int nparts = 10;
+	cout << "Enter partitions: ";
+	cin >> nparts;
 
 
 	//Edges edges;
@@ -228,7 +346,6 @@ int main()
 	vector<int> xadj, adjncy;
 	toCSR(nodes, xadj, adjncy);
 	vector<int> parts(nodes.size());
-	int nparts = 10;
 	get_parts(xadj, adjncy, parts, nparts);
 	cout << "Running tests.\n";
 
