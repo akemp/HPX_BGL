@@ -4,155 +4,30 @@
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #include "headers.hpp"
 
+struct bool_name_t {
+	typedef boost::vertex_property_tag kind;
+};
+
+typedef boost::property<bool_name_t, std::vector<bool> > BoolColor; //parent, color, partition, distance
+typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+	BoolColor> BoolGraph;
 
 struct SubGraph
 {
-
-	void multival(vector<int> starts, bool sequential)
+	~SubGraph()
 	{
-		if (!sequential)
-		{
-			vector<std::thread> futures;
-			int i = 0;
-			int adder = 1;
-			for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
-			{
-				int last = i;
-				i += adder;
-				if (i < starts.size())
-				{
-					futures.push_back(std::thread(&runMp, it, last, adder, this));
-				}
-				else
-				{
-					futures.push_back(std::thread(&runMp, it, last, starts.size() - last, this));
-					break;
-				}
-			}
-			for (int i = 0; i < futures.size(); ++i)
-				futures[i].join();
-		}
-		else
-		{
-			for (int i = 0; i < starts.size(); ++i)
-			{
-				mpbfs(starts[i], i);
-			}
-		}
-	}
-	static void runMp(vector<int>::iterator loc, int index, int size, SubGraph* gc)
-	{
-		for (int i = 0; i < size; ++i)
-		{
-			gc->mpbfs(*loc, index + i);
-			++loc;
-		}
-	}
-	static vector<int> process_layor_multi(int loc, vector<int> in_bag, Graph* g)
-	{
-		property_map < Graph, vertex_index_t >::type
-			index_map = get(vertex_index, *g);
-		property_map<Graph, multi_name_t>::type
-			name = get(multi_name_t(), *g);
-		vector<int> out_bag;
-		int count = 0;
-		for (int i = 0; i < in_bag.size(); ++i)
-		{
-			int val = in_bag[i];
-			graph_traits < Graph >::adjacency_iterator ai, a_end;
-
-			for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
-			{
-				int ind = get(index_map, *ai);
-				if (name[ind][loc] >= 0)
-					continue;
-				name[ind][loc] = val;
-				out_bag.push_back(ind);
-			}
-		}
-		return out_bag;
-	}
-	void mpbfs(int index, int loc)
-	{
-		name[index][loc] = index;
-		vector<int> v;
-		int dist = 0;
-		v.push_back(index);
-		Graph* ptr = &g;
-		while (!v.empty())
-		{
-			vector<std::future<vector<int>>> futures;
-			futures.reserve(v.size() / grainsize + 1);
-			{
-				int i = 0;
-				for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
-				{
-					int last = i;
-					i += grainsize;
-					if (i < v.size())
-						futures.push_back(std::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr)));
-					else
-					{
-						futures.push_back(std::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr)));
-						break;
-					}
-				}
-			}
-			vector<int> children;
-			for (int i = 0; i < futures.size(); ++i)
-			{
-				vector<int> future = futures[i].get();
-				children.insert(children.end(), future.begin(), future.end());
-			}
-			v = children;
-		}
-	}
-	static void parreset(Graph* g, int start, int size, int toggled)
-	{
-		property_map<Graph, multi_name_t>::type
-			name = get(multi_name_t(), *g);
-		for (int i = start; i < start + size; ++i)
-		{
-			name[i] = vector<int>(toggled, -1);
-		}
-	}
-
-	void reset(int toggled)
-	{
-		int adder = grainsize;
-
-		vector<std::thread> futs;
-		Graph* ptr = &g;
-
-		for (int i = 0; i < num_vertices(g); i += adder)
-		{
-			if (i + adder < num_vertices(g))
-			{
-				futs.push_back(std::thread(&parreset, ptr, i, adder, toggled));
-			}
-			else
-			{
-				futs.push_back(std::thread(&parreset, ptr, i, num_vertices(g) - i, toggled));
-			}
-		}
-		for (int i = 0; i < futs.size(); ++i)
-			futs[i].join();
 
 	}
 
-	int getval(int i, int index)
-	{
-		return name[i][index];
-	}
 	void multireset(int starts)
 	{
 		for (int i = 0; i < num_vertices(g); ++i)
 		{
-			name[i] = vector<int>(starts, -1);
+			name[i] = vector<bool>(starts, false);
 		}
 	}
 
-	void set(vector<vector<int>> nodes, int size, int edge, int starts, int index, vector<int> map, vector<SubGraph*> n)
+	void set(vector<vector<int>> nodes, int size, int edge, int starts, int index, vector<int> map)
 	{
 		part = index;
 		parts = map;
@@ -161,83 +36,92 @@ struct SubGraph
 			for (int j = 0; j < nodes[i].size(); ++j)
 			{
 				int val = nodes[i][j];
-				if (parts[i] == part || parts[val] == part)
+				//if (parts[i] == part || parts[val] == part)
 					add_edge(i, val, g);
 			}
 		}
 		grainsize = size;
 		edgefact = edge;
 
-		name = get(multi_name_t(), g);
-		dists = vector<vector<int>>(num_vertices(g),vector<int>(starts, 999999999));
+		name = get(bool_name_t(), g);
 		multireset(starts);
-		neighbors = n;
 	}
 
-	int getmultival(int index, int i)
+	static vector<pair<int, int>> process_layor_multi(int loc, vector<pair<int, int>> in_bag,
+		BoolGraph* g, vector<int>* parts, int part)
 	{
-		return name[index][i];
-	}
-
-	static void bfs_partition(int start, int loc, SubGraph* g, int parent, int dist)
-	{
-		g->bfs_search(start, loc, parent, dist);
-	}
-	void bfs_search(int index, int loc, int parent, int dist)
-	{
-		property_map < Graph, vertex_index_t >::type
-			index_map = get(vertex_index, g);
-		//pennants = std::vector <int>(num_vertices(g), -1);
-		if (dist >= dists[index][loc])
-			return;
-		//dists[parent][loc] = dist-1;
-		name[index][loc] = parent;
-		dists[index][loc] = dist;
-		vector<int> q;
-		q.push_back(index);
-		int spot = 0;
-		while (spot < q.size())
+		property_map < BoolGraph, vertex_index_t >::type
+			index_map = get(vertex_index, *g);
+		property_map<BoolGraph, bool_name_t>::type
+			name = get(bool_name_t(), *g);
+		vector<pair<int,int>> out_bag;
+		int count = 0;
+		for (int i = 0; i < in_bag.size(); ++i)
 		{
-			int ind = q[spot];
-			++spot;
-			int sampart = parts[ind];
-			if (sampart != part)
-			{
-				int temp = name[ind][loc];
-				bfs_partition(ind, loc, neighbors[sampart], temp, dists[ind][loc]);
+			int parent = in_bag[i].first;
+			name[parent][loc] = true;
+			if ((*parts)[parent] != part)
 				continue;
-			}
-			parent = ind;
-			graph_traits < Graph >::adjacency_iterator ai, a_end;
+			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
 
-			for (boost::tie(ai, a_end) = out_edges(ind, g); ai != a_end; ++ai)
+			for (boost::tie(ai, a_end) = adjacent_vertices(parent, *g); ai != a_end; ++ai)
 			{
-				ind = get(index_map, *ai);
-				int dist2 = dists[parent][loc] + 1;
-				if (dist2 < dists[ind][loc])
+				int ind = get(index_map, *ai);
+				if (name[ind][loc])
+					continue;
+				name[ind][loc] = true;
+				out_bag.push_back(pair<int, int>(ind, parent));
+			}
+		}
+		return out_bag;
+	}
+	vector<pair<int,int>> bfs_search(vector<pair<int,int>> indices, int loc)
+	{
+		vector<pair<int,int>> q;
+		property_map < BoolGraph, vertex_index_t >::type
+			index_map = get(vertex_index, g);
+		vector<std::future<vector<pair<int,int>>>> futures;
+		futures.reserve(indices.size() / grainsize + 1);
+		{
+			BoolGraph* ptr = &g;
+			int i = 0;
+			for (vector<pair<int,int>>::iterator it = indices.begin(); it < indices.end(); it += grainsize)
+			{
+				int last = i;
+				i += grainsize;
+				int ind = it->first;
+				if (i < indices.size())
+					futures.push_back(std::async(std::bind(&process_layor_multi, loc,
+					vector<pair<int,int>>(it, it + grainsize), ptr,
+					&parts, part)));
+				else
 				{
-					dists[ind][loc] = dist2;
-					name[ind][loc] = parent;
-					q.push_back(ind);
+					futures.push_back(std::async(std::bind(&process_layor_multi, loc,
+						vector<pair<int,int>>(it, it + (indices.size() - last)), ptr,
+						&parts, part)));
+					break;
 				}
 			}
-
+			for (int i = 0; i < futures.size(); ++i)
+			{
+				vector<pair<int,int>> future = futures[i].get();
+				q.insert(q.end(), future.begin(), future.end());
+			}
 		}
+		return q;
 	};
 
 	int getnum()
 	{
 		return num_vertices(g);
 	}
-	property_map<Graph, multi_name_t>::type
+	property_map<BoolGraph, bool_name_t>::type
 		name;
-	Graph g;
+	BoolGraph g;
 	int grainsize = 9999;
 	int edgefact = 16;
-	vector<SubGraph*> neighbors;
 	vector<int> parts;
 	int part;
-	vector<vector<int>> dists;
 };
 
 struct MultiComponent
@@ -245,11 +129,6 @@ struct MultiComponent
 	void set(vector<int> parts, vector<vector<int>> nodes, int size, int edge, int starts, int nparts)
 	{
 		graphs = vector<SubGraph>(nparts);
-		neighbors = vector<SubGraph*>(nparts);
-		for (int i = 0; i < nparts; ++i)
-		{
-			neighbors[i] = (&(graphs[i]));
-		}
 		grainsize = size;
 		edgefact = edge;
 		vertexmap = parts;
@@ -257,34 +136,56 @@ struct MultiComponent
 		//int starts, int partno, vector<int> map, int index, vector<SubGraph*> n)
 		for (int i = 0; i < nparts; ++i)
 		{
-			graphs[i].set(nodes, size, edge, starts, i, vertexmap, neighbors);
+			graphs[i].set(nodes, size, edge, starts, i, vertexmap);
 		}
+		parents = vector<vector<int>>(graphs.front().getnum(), vector<int>(starts, -1));
 	};
-	static void search_act(int start, int i, SubGraph* g)
+	static vector<pair<int, int>> bfs_search_act(SubGraph* graph, vector<pair<int, int>> starter, int i)
 	{
-		g->bfs_search(start, i, start, 0);
+		return graph->bfs_search(starter, i);
+	}
+	static void search_act(SubGraph* graph, int start, int i)
+	{
+
 	}
 	void search(vector<int> starts)
 	{
-		vector<thread> threads;
 		for (int i = 0; i < starts.size(); ++i)
 		{
 			int start = starts[i];
-			int partition = vertexmap[start];
-			//graphs[partition].bfs_search(start, i, start, 0);
-			threads.push_back(thread(&search_act, start, i, &graphs[partition]));
+			vector<pair<int,int>> starter;
+			starter.push_back(pair<int,int>(start,start));
+			while (starter.size() > 0)
+			{
+				vector<future<vector<pair<int, int>>>> futs;
+				for (int j = 0; j < graphs.size(); ++j)
+				{
+					futs.push_back(async(&bfs_search_act,&graphs[j], starter, i));
+				}
+				starter.clear();
+				for (int j = 0; j < futs.size(); ++j)
+				{
+					vector<pair<int, int>> child = futs[j].get();;
+					for (int k = 0; k < child.size(); ++k)
+					{
+						pair<int, int> sample = child[k];
+						if (parents[sample.first][i] < 0)
+						{
+							parents[sample.first][i] = sample.second;
+							starter.push_back(sample);
+						}
+					}
+				}
+			}
 		}
-		for (int i = 0; i < threads.size(); ++i)
-			threads[i].join();
 	}
 	int getmultival(int index, int i)
 	{
-		int partition = vertexmap[index];
-		return graphs[partition].getval(index,i);
+		return parents[index][i];
 	}
 	vector<SubGraph> graphs;
-	vector<SubGraph*> neighbors;
 	vector<int> vertexmap;
+	vector<vector<int>> parents;
 	int grainsize = 9999;
 	int edgefact = 16;
 };
