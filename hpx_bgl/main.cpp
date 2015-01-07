@@ -46,66 +46,26 @@ struct SubGraph
 		name = get(bool_name_t(), g);
 		multireset(starts);
 	}
-
-	static vector<pair<int, int>> process_layor_multi(int loc, vector<pair<int, int>> in_bag,
-		BoolGraph* g, vector<int>* parts, int part)
+	vector<pair<int,int>> bfs_search(vector<pair<int,int>>& indices, int loc)
 	{
+		vector<pair<int,int>> q;
 		property_map < BoolGraph, vertex_index_t >::type
-			index_map = get(vertex_index, *g);
-		property_map<BoolGraph, bool_name_t>::type
-			name = get(bool_name_t(), *g);
-		vector<pair<int,int>> out_bag;
-		int count = 0;
-		for (int i = 0; i < in_bag.size(); ++i)
+			index_map = get(vertex_index, g);
+		for (int i = 0; i < indices.size(); ++i)
 		{
-			int parent = in_bag[i].first;
+			int parent = indices[i].first;
 			name[parent][loc] = true;
-			if ((*parts)[parent] != part)
+			if (parts[parent] != part)
 				continue;
 			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
 
-			for (boost::tie(ai, a_end) = adjacent_vertices(parent, *g); ai != a_end; ++ai)
+			for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
 			{
 				int ind = get(index_map, *ai);
 				if (name[ind][loc])
 					continue;
 				name[ind][loc] = true;
-				out_bag.push_back(pair<int, int>(ind, parent));
-			}
-		}
-		return out_bag;
-	}
-	vector<pair<int,int>> bfs_search(vector<pair<int,int>> indices, int loc)
-	{
-		vector<pair<int,int>> q;
-		property_map < BoolGraph, vertex_index_t >::type
-			index_map = get(vertex_index, g);
-		vector<std::future<vector<pair<int,int>>>> futures;
-		futures.reserve(indices.size() / grainsize + 1);
-		{
-			BoolGraph* ptr = &g;
-			int i = 0;
-			for (vector<pair<int,int>>::iterator it = indices.begin(); it < indices.end(); it += grainsize)
-			{
-				int last = i;
-				i += grainsize;
-				int ind = it->first;
-				if (i < indices.size())
-					futures.push_back(std::async(std::bind(&process_layor_multi, loc,
-					vector<pair<int,int>>(it, it + grainsize), ptr,
-					&parts, part)));
-				else
-				{
-					futures.push_back(std::async(std::bind(&process_layor_multi, loc,
-						vector<pair<int,int>>(it, it + (indices.size() - last)), ptr,
-						&parts, part)));
-					break;
-				}
-			}
-			for (int i = 0; i < futures.size(); ++i)
-			{
-				vector<pair<int,int>> future = futures[i].get();
-				q.insert(q.end(), future.begin(), future.end());
+				q.push_back(pair<int, int>(ind, parent));
 			}
 		}
 		return q;
@@ -132,8 +92,6 @@ struct MultiComponent
 		grainsize = size;
 		edgefact = edge;
 		vertexmap = parts;
-		//void set(vector<vector<int>> nodes, int size, int edge,
-		//int starts, int partno, vector<int> map, int index, vector<SubGraph*> n)
 		for (int i = 0; i < nparts; ++i)
 		{
 			graphs[i].set(nodes, size, edge, starts, i, vertexmap);
@@ -144,12 +102,9 @@ struct MultiComponent
 	{
 		return graph->bfs_search(starter, i);
 	}
-	static void search_act(SubGraph* graph, int start, int i)
-	{
-
-	}
 	void search(vector<int> starts)
 	{
+		int size = grainsize;
 		for (int i = 0; i < starts.size(); ++i)
 		{
 			int start = starts[i];
@@ -158,9 +113,25 @@ struct MultiComponent
 			while (starter.size() > 0)
 			{
 				vector<future<vector<pair<int, int>>>> futs;
-				for (int j = 0; j < graphs.size(); ++j)
+
+				int spot = 0;
+				for (vector<pair<int, int>>::iterator it = starter.begin(); it < starter.end(); it += size)
 				{
-					futs.push_back(async(&bfs_search_act,&graphs[j], starter, i));
+					int last = spot;
+					spot += size;
+					for (int j = 0; j < graphs.size(); ++j)
+					{
+						if (spot < starter.size())
+						{
+							futs.push_back(async(&bfs_search_act, &graphs[j], vector<pair<int, int>>(it, it + size), i));
+						}
+						else
+						{
+							futs.push_back(async(&bfs_search_act, &graphs[j], vector<pair<int, int>>(it, it + starter.size()-last), i));
+						}
+					}
+					if (spot >= starter.size())
+					break;
 				}
 				starter.clear();
 				for (int j = 0; j < futs.size(); ++j)
