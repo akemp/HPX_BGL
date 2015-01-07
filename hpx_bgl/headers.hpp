@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>         // std::thread
 #include <future>
+#include <atomic>
 #include "../metis/include/metis.h"
 
 #include <boost/random.hpp>
@@ -27,6 +28,15 @@ struct multi_name_t {
 typedef boost::property<multi_name_t, std::vector<int> > MultiColor; //parent, color, partition, distance
 typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
 	MultiColor> Graph;
+
+struct pair_name_t {
+	typedef boost::vertex_property_tag kind;
+};
+
+typedef boost::property<pair_name_t, std::vector<std::pair<int,int>> > PairColor; //parent, color, partition, distance
+typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+	PairColor> PairGraph;
+
 
 int get_parts(std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy, std::vector<idx_t> &part,
 	idx_t nparts);

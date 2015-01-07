@@ -4,116 +4,18 @@
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #include "headers.hpp"
 
-
 struct SubGraph
 {
-
-	void multival(vector<int> starts, bool sequential)
+	~SubGraph()
 	{
-		if (!sequential)
-		{
-			vector<std::thread> futures;
-			int i = 0;
-			int adder = 1;
-			for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
-			{
-				int last = i;
-				i += adder;
-				if (i < starts.size())
-				{
-					futures.push_back(std::thread(&runMp, it, last, adder, this));
-				}
-				else
-				{
-					futures.push_back(std::thread(&runMp, it, last, starts.size() - last, this));
-					break;
-				}
-			}
-			for (int i = 0; i < futures.size(); ++i)
-				futures[i].join();
-		}
-		else
-		{
-			for (int i = 0; i < starts.size(); ++i)
-			{
-				mpbfs(starts[i], i);
-			}
-		}
 	}
-	static void runMp(vector<int>::iterator loc, int index, int size, SubGraph* gc)
+	static void parreset(PairGraph* g, int start, int size, int toggled)
 	{
-		for (int i = 0; i < size; ++i)
-		{
-			gc->mpbfs(*loc, index + i);
-			++loc;
-		}
-	}
-	static vector<int> process_layor_multi(int loc, vector<int> in_bag, Graph* g)
-	{
-		property_map < Graph, vertex_index_t >::type
-			index_map = get(vertex_index, *g);
-		property_map<Graph, multi_name_t>::type
-			name = get(multi_name_t(), *g);
-		vector<int> out_bag;
-		int count = 0;
-		for (int i = 0; i < in_bag.size(); ++i)
-		{
-			int val = in_bag[i];
-			graph_traits < Graph >::adjacency_iterator ai, a_end;
-
-			for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
-			{
-				int ind = get(index_map, *ai);
-				if (name[ind][loc] >= 0)
-					continue;
-				name[ind][loc] = val;
-				out_bag.push_back(ind);
-			}
-		}
-		return out_bag;
-	}
-	void mpbfs(int index, int loc)
-	{
-		name[index][loc] = index;
-		vector<int> v;
-		int dist = 0;
-		v.push_back(index);
-		Graph* ptr = &g;
-		while (!v.empty())
-		{
-			vector<std::future<vector<int>>> futures;
-			futures.reserve(v.size() / grainsize + 1);
-			{
-				int i = 0;
-				for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
-				{
-					int last = i;
-					i += grainsize;
-					if (i < v.size())
-						futures.push_back(std::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr)));
-					else
-					{
-						futures.push_back(std::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr)));
-						break;
-					}
-				}
-			}
-			vector<int> children;
-			for (int i = 0; i < futures.size(); ++i)
-			{
-				vector<int> future = futures[i].get();
-				children.insert(children.end(), future.begin(), future.end());
-			}
-			v = children;
-		}
-	}
-	static void parreset(Graph* g, int start, int size, int toggled)
-	{
-		property_map<Graph, multi_name_t>::type
-			name = get(multi_name_t(), *g);
+		property_map<PairGraph, pair_name_t>::type
+			name = get(pair_name_t(), *g);
 		for (int i = start; i < start + size; ++i)
 		{
-			name[i] = vector<int>(toggled, -1);
+			name[i] = vector<pair<int,int>>(toggled, pair<int,int>(-1,9999999));
 		}
 	}
 
@@ -122,7 +24,7 @@ struct SubGraph
 		int adder = grainsize;
 
 		vector<std::thread> futs;
-		Graph* ptr = &g;
+		PairGraph* ptr = &g;
 
 		for (int i = 0; i < num_vertices(g); i += adder)
 		{
@@ -142,13 +44,13 @@ struct SubGraph
 
 	int getval(int i, int index)
 	{
-		return name[i][index];
+		return name[i][index].first;
 	}
 	void multireset(int starts)
 	{
 		for (int i = 0; i < num_vertices(g); ++i)
 		{
-			name[i] = vector<int>(starts, -1);
+			name[i] = vector<pair<int,int>>(starts, pair<int,int>(-1,9999999));
 		}
 	}
 
@@ -156,27 +58,25 @@ struct SubGraph
 	{
 		part = index;
 		parts = map;
+		grainsize = size;
+		edgefact = edge;
+		neighbors = n;
 		for (int i = 0; i < nodes.size(); ++i)
 		{
 			for (int j = 0; j < nodes[i].size(); ++j)
 			{
 				int val = nodes[i][j];
-				//if (parts[i] == part || parts[val] == part)
-				add_edge(i, val, g);
+				if (parts[i] == part || parts[val] == part)
+					add_edge(i, val, g);
 			}
 		}
-		grainsize = size;
-		edgefact = edge;
-
-		name = get(multi_name_t(), g);
-		dists = vector<vector<int>>(num_vertices(g),vector<int>(starts, 999999999));
+		name = get(pair_name_t(), g);
 		multireset(starts);
-		neighbors = n;
 	}
 
 	int getmultival(int index, int i)
 	{
-		return name[index][i];
+		return name[index][i].first;
 	}
 
 	static void bfs_partition(int start, int loc, SubGraph* g, int parent, int dist)
@@ -185,62 +85,65 @@ struct SubGraph
 	}
 	void bfs_search(int index, int loc, int parent, int dist)
 	{
-		property_map < Graph, vertex_index_t >::type
+		property_map < PairGraph, vertex_index_t >::type
 			index_map = get(vertex_index, g);
 		//pennants = std::vector <int>(num_vertices(g), -1);
-		if (dist >= dists[index][loc])
+		if (dist >= name[index][loc].second)
+		{
 			return;
-		//dists[parent][loc] = 0;
-		name[index][loc] = parent;
-		dists[index][loc] = dist;
+		}
+
+		name[parent][loc].second = dist - 1;
+		
+		name[index][loc].first = parent;
+		name[index][loc].second = dist;
+
 		vector<int> q;
 		q.push_back(index);
 		int spot = 0;
-		vector<thread> threads;
 		while (spot < q.size())
 		{
 			int ind = q[spot];
 			++spot;
-			int sampart = parts[ind];
-			if (sampart != part)
-			{
-				int temp = name[ind][loc];
-				threads.push_back(thread(&bfs_partition,ind, loc, neighbors[sampart], temp, dists[ind][loc]));
-				continue;
-			}
 			parent = ind;
-			graph_traits < Graph >::adjacency_iterator ai, a_end;
+			graph_traits < PairGraph >::adjacency_iterator ai, a_end;
 
 			for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
 			{
 				ind = get(index_map, *ai);
-				int dist2 = dists[parent][loc] + 1;
-				if (dist2 < dists[ind][loc])
+				int dist2 = name[parent][loc].second + 1;
+				if (dist2 < name[ind][loc].second)
 				{
-					dists[ind][loc] = dist2;
-					name[ind][loc] = parent;
+					name[ind][loc].second = dist2;
+					name[ind][loc].first = parent;
+					int sampart = parts[ind];
+					if (sampart != part)
+					{
+						bfs_partition(ind, loc, neighbors[sampart], parent, dist2);
+						continue;
+					}
 					q.push_back(ind);
 				}
 			}
 
 		}
-		for (int i = 0; i < threads.size(); ++i)
-			threads[i].join();
 	};
 
 	int getnum()
 	{
 		return num_vertices(g);
 	}
-	property_map<Graph, multi_name_t>::type
+
+	property_map<PairGraph, pair_name_t>::type
 		name;
-	Graph g;
+	PairGraph g;
 	int grainsize = 9999;
 	int edgefact = 16;
 	vector<SubGraph*> neighbors;
 	vector<int> parts;
 	int part;
-	vector<vector<int>> dists;
+	vector<shared_future<void>> threads;
+	int numthreads = 0;
 };
 
 struct MultiComponent
@@ -249,18 +152,18 @@ struct MultiComponent
 	{
 		graphs = vector<SubGraph>(nparts);
 		neighbors = vector<SubGraph*>(nparts);
-		for (int i = 0; i < nparts; ++i)
-		{
-			neighbors[i] = (&(graphs[i]));
-		}
 		grainsize = size;
 		edgefact = edge;
 		vertexmap = parts;
 		//void set(vector<vector<int>> nodes, int size, int edge,
 		//int starts, int partno, vector<int> map, int index, vector<SubGraph*> n)
+		for (int i = 0; i < graphs.size(); ++i)
+		{
+			neighbors[i] = (&(graphs[i]));
+		}
 		for (int i = 0; i < nparts; ++i)
 		{
-			graphs[i].set(nodes, size, edge, starts, i, vertexmap, neighbors);
+			graphs[i].set(nodes, grainsize, edgefact, starts, i, vertexmap, neighbors);
 		}
 	};
 	static void search_act(int start, int i, SubGraph* g)
@@ -269,16 +172,16 @@ struct MultiComponent
 	}
 	void search(vector<int> starts)
 	{
-		vector<thread> threads;
+		//vector<thread> threads;
 		for (int i = 0; i < starts.size(); ++i)
 		{
 			int start = starts[i];
 			int partition = vertexmap[start];
-			//graphs[partition].bfs_search(start, i, start, 0);
-			threads.push_back(thread(&search_act, start, i, &graphs[partition]));
+			graphs[partition].bfs_search(start, i, start, 0);
+			//threads.push_back(thread(&search_act, start, i, &graphs[partition]));
 		}
-		for (int i = 0; i < threads.size(); ++i)
-			threads[i].join();
+		//for (int i = 0; i < threads.size(); ++i)
+		//	threads[i].join();
 	}
 	int getmultival(int index, int i)
 	{
@@ -352,6 +255,7 @@ int main()
 
 	vector<int> starts(searches);
 
+	int criticallength = 0;
 
 	vector<vector<pair<int, int>>> counts;
 	cout << "Setting up serial values for testing.\n";
@@ -392,10 +296,13 @@ int main()
 					sample = hw.getmultival(sample, j);
 				}
 				counts[j][i].second = count;
+				if (count > criticallength)
+					criticallength = count;
 				//cout << endl;
 			}
 		}
 	}
+	cout << "Critical length of " << criticallength << endl;
 	if (acctest != 0)
 	{
 		cout << "Running accuracy tests.\n";
@@ -470,7 +377,7 @@ int main()
 			  }
 		  }
 	  }
-
+		/*
 		{
 			hpx::util::high_resolution_timer t;
 			t.restart();
@@ -510,7 +417,7 @@ int main()
 					//cout << endl;
 				}
 			}
-		}
+		}*/
 		cout << "Accuracy tests complete.\n";
 	}
 	cout << "Serial comparison:\n";
