@@ -161,8 +161,8 @@ struct SubGraph
 			for (int j = 0; j < nodes[i].size(); ++j)
 			{
 				int val = nodes[i][j];
-				//if (parts[i] == part || parts[val] == part)
-				add_edge(i, val, g);
+				if (parts[i] == part || parts[val] == part)
+					add_edge(i, val, g);
 			}
 		}
 		grainsize = size;
@@ -190,13 +190,12 @@ struct SubGraph
 		//pennants = std::vector <int>(num_vertices(g), -1);
 		if (dist >= dists[index][loc])
 			return;
-		//dists[parent][loc] = 0;
+		//dists[parent][loc] = dist-1;
 		name[index][loc] = parent;
 		dists[index][loc] = dist;
 		vector<int> q;
 		q.push_back(index);
 		int spot = 0;
-		vector<thread> threads;
 		while (spot < q.size())
 		{
 			int ind = q[spot];
@@ -205,13 +204,13 @@ struct SubGraph
 			if (sampart != part)
 			{
 				int temp = name[ind][loc];
-				threads.push_back(thread(&bfs_partition,ind, loc, neighbors[sampart], temp, dists[ind][loc]));
+				bfs_partition(ind, loc, neighbors[sampart], temp, dists[ind][loc]);
 				continue;
 			}
 			parent = ind;
 			graph_traits < Graph >::adjacency_iterator ai, a_end;
 
-			for (boost::tie(ai, a_end) = adjacent_vertices(ind, g); ai != a_end; ++ai)
+			for (boost::tie(ai, a_end) = out_edges(ind, g); ai != a_end; ++ai)
 			{
 				ind = get(index_map, *ai);
 				int dist2 = dists[parent][loc] + 1;
@@ -224,8 +223,6 @@ struct SubGraph
 			}
 
 		}
-		for (int i = 0; i < threads.size(); ++i)
-			threads[i].join();
 	};
 
 	int getnum()
