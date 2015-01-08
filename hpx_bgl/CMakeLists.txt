@@ -1,6 +1,7 @@
 
 set (sources
      headers.hpp
+     main.hpp
      main.cpp
      structures.cpp
 )
