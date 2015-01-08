@@ -36,7 +36,7 @@ struct SubGraph
 			for (int j = 0; j < nodes[i].size(); ++j)
 			{
 				int val = nodes[i][j];
-				//if (parts[i] == part || parts[val] == part)
+				if (parts[i] == part || parts[val] == part)
 					add_edge(i, val, g);
 			}
 		}
@@ -112,7 +112,7 @@ struct MultiComponent
 			starter.push_back(pair<int,int>(start,start));
 			while (starter.size() > 0)
 			{
-				vector<future<vector<pair<int, int>>>> futs;
+				vector<hpx::future<vector<pair<int, int>>>> futs;
 
 				int spot = 0;
 				for (vector<pair<int, int>>::iterator it = starter.begin(); it < starter.end(); it += size)
@@ -123,11 +123,11 @@ struct MultiComponent
 					{
 						if (spot < starter.size())
 						{
-							futs.push_back(async(&bfs_search_act, &graphs[j], vector<pair<int, int>>(it, it + size), i));
+							futs.push_back(hpx::async(&bfs_search_act, &graphs[j], vector<pair<int, int>>(it, it + size), i));
 						}
 						else
 						{
-							futs.push_back(async(&bfs_search_act, &graphs[j], vector<pair<int, int>>(it, it + starter.size()-last), i));
+							futs.push_back(hpx::async(&bfs_search_act, &graphs[j], vector<pair<int, int>>(it, it + starter.size()-last), i));
 						}
 					}
 					if (spot >= starter.size())

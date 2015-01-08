@@ -1,13 +1,17 @@
 #ifndef HEADERS_BGL
 #define HEADERS_BGL
 
+#include <hpx/hpx_main.hpp>
+#include <hpx/include/runtime.hpp>
+#include <hpx/include/thread_executors.hpp>
+#include <hpx/util/high_resolution_timer.hpp>
+#include <hpx/include/components.hpp>
+#include <hpx/include/actions.hpp>
+#include <hpx/include/iostreams.hpp>
 #include <fstream>
 #include <iostream>
 #include <vector>
 #include <queue>
-#include <mutex>
-#include <thread>         // std::thread
-#include <future>
 #include "../metis/include/metis.h"
 
 #include <boost/random.hpp>
@@ -32,8 +36,6 @@ int get_parts(std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy, std::vector<
 	idx_t nparts);
 void toCSR(const std::vector<std::vector<idx_t>>& nodes, std::vector<idx_t>& xadj, std::vector<idx_t>& adjncy);
 
-typedef std::mutex mutex_type;
-
 using namespace boost;
 using namespace std;
 struct GraphComponent
@@ -52,18 +54,18 @@ struct GraphComponent
 	{
 		int adder = grainsize;
 
-		vector<std::thread> futs;
+		vector<hpx::thread> futs;
 		Graph* ptr = &g;
 
 		for (int i = 0; i < num_vertices(g); i += adder)
 		{
 			if (i + adder < num_vertices(g))
 			{
-				futs.push_back(std::thread(&parreset, ptr, i, adder, toggled));
+				futs.push_back(hpx::thread(&parreset, ptr, i, adder, toggled));
 			}
 			else
 			{
-				futs.push_back(std::thread(&parreset, ptr, i, num_vertices(g) - i, toggled));
+				futs.push_back(hpx::thread(&parreset, ptr, i, num_vertices(g) - i, toggled));
 			}
 		}
 		for (int i = 0; i < futs.size(); ++i)
@@ -113,7 +115,7 @@ struct GraphComponent
 	{
 		if (!sequential)
 		{
-			vector<std::thread> futures;
+			vector<hpx::thread> futures;
 			int i = 0;
 			int adder = 1;
 			for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
@@ -122,11 +124,11 @@ struct GraphComponent
 				i += adder;
 				if (i < starts.size())
 				{
-					futures.push_back(std::thread(&runMp, it, last, adder, this));
+					futures.push_back(hpx::thread(&runMp, it, last, adder, this));
 				}
 				else
 				{
-					futures.push_back(std::thread(&runMp, it, last, starts.size() - last, this));
+					futures.push_back(hpx::thread(&runMp, it, last, starts.size() - last, this));
 					break;
 				}
 			}
@@ -182,7 +184,7 @@ struct GraphComponent
 		Graph* ptr = &g;
 		while (!v.empty())
 		{
-			vector<std::future<vector<int>>> futures;
+			vector<hpx::future<vector<int>>> futures;
 			futures.reserve(v.size() / grainsize + 1);
 			{
 				int i = 0;
@@ -191,10 +193,10 @@ struct GraphComponent
 					int last = i;
 					i += grainsize;
 					if (i < v.size())
-						futures.push_back(std::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr)));
+						futures.push_back(hpx::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr)));
 					else
 					{
-						futures.push_back(std::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr)));
+						futures.push_back(hpx::async(std::bind(&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr)));
 						break;
 					}
 				}

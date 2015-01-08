@@ -5,6 +5,8 @@ set (sources
      structures.cpp
 )
      
-add_executable(hpx_bgl ${sources})
-
-target_link_libraries(hpx_bgl metis)
+add_hpx_executable(hpx_bgl
+SOURCES ${sources}
+FOLDER
+COMPONENT_DEPENDENCIES iostreams
+DEPENDENCIES metis)
