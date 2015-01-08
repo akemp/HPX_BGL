@@ -33,7 +33,7 @@ struct SubGraph
 			for (int j = 0; j < nodes[i].size(); ++j)
 			{
 				int val = nodes[i][j];
-				if (parts[i] == part || parts[val] == part)
+				//if (parts[i] == part || parts[val] == part)
 					add_edge(i, val, g);
 			}
 		}
@@ -43,26 +43,35 @@ struct SubGraph
 		name = get(bool_name_t(), g);
 		multireset(starts);
 	}
-	vector<pair<int, int>> bfs_search(vector<pair<int, int>> indices, int loc)
+	vector<pair<int, int>> bfs_search(int index, int parent, int loc)
 	{
 		vector<pair<int, int>> q;
+		if (name[index][loc])
+			return q;
 		property_map < BoolGraph, vertex_index_t >::type
 			index_map = get(vertex_index, g);
-		for (int i = 0; i < (indices).size(); ++i)
+		q.push_back(pair<int,int>(index,parent));
 		{
-			int parent = (indices)[i].first;
-			name[parent][loc] = true;
-			if (parts[parent] != part)
-				continue;
-			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
-
-			for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
+			for (int i = 0; i < q.size(); ++i)
 			{
-				int ind = get(index_map, *ai);
-				if (name[ind][loc])
-					continue;
-				name[ind][loc] = true;
-				q.push_back(pair<int, int>(ind, parent));
+				parent = q[i].first;
+				name[parent][loc] = true;
+				graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
+
+				for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
+				{
+					int ind = get(index_map, *ai);
+					if (name[ind][loc])
+						continue;
+					int spot = parts[ind];
+					if (spot != part)
+					{
+						vector<pair<int, int>> temp = neighbors[spot]->bfs_search(ind, parent, loc);
+						q.insert(q.end(), temp.begin(), temp.end());
+						continue;
+					}
+					q.push_back(pair<int, int>(ind, parent));
+				}
 			}
 		}
 		return q;
@@ -78,6 +87,7 @@ struct SubGraph
 	int grainsize = 9999;
 	int edgefact = 16;
 	vector<int> parts;
+	vector<SubGraph*> neighbors;
 	int part;
 };
 
@@ -93,16 +103,30 @@ struct MultiComponent
 		{
 			graphs[i].set(nodes, size, edge, starts, i, vertexmap);
 		}
+		neighbors = vector<SubGraph*>(nparts);
+		for (int i = 0; i < graphs.size(); ++i)
+		{
+			neighbors[i] = &graphs[i];
+		}
+		for (int i = 0; i < graphs.size(); ++i)
+		{
+			graphs[i].neighbors = neighbors;
+		}
 		parents = vector<vector<int>>(graphs.front().getnum(), vector<int>(starts, -1));
 	};
-	static vector<pair<int, int>> bfs_search_act(SubGraph* graph, vector<pair<int, int>> starter, int i)
-	{
-		return graph->bfs_search(starter, i);
-	}
 	static void run(int start, int size, int i, vector<SubGraph>* graphs, vector<vector<int>>* parents)
 	{
-		vector<pair<int, int>> starter;
-		starter.push_back(pair<int, int>(start, start));
+
+		vector<pair<int, int>> child = (graphs)->front().bfs_search(start, start, i);
+		for (int k = 0; k < child.size(); ++k)
+		{
+			pair<int, int> sample = child[k];
+			if ((*parents)[sample.first][i] < 0)
+			{
+				(*parents)[sample.first][i] = sample.second;
+			}
+		}
+		/*
 		while (starter.size() > 0)
 		{
 			vector<hpx::future<vector<pair<int, int>>>> futs;
@@ -110,11 +134,12 @@ struct MultiComponent
 			int spot = 0;
 			vector < vector<pair<int, int>>> inputs;
 			int counter = 0;
+			
 			for (vector<pair<int, int>>::iterator it = starter.begin(); it < starter.end(); it += size)
 			{
 				int last = spot;
 				spot += size;
-				//vector<pair<int, int>> input;
+
 				if (spot < starter.size())
 					inputs.push_back(vector<pair<int, int>>(it, it + size));
 				else
@@ -141,7 +166,7 @@ struct MultiComponent
 					}
 				}
 			}
-		}
+		}*/
 	}
 	void search(vector<int> starts)
 	{
@@ -164,5 +189,6 @@ struct MultiComponent
 	vector<vector<int>> parents;
 	int grainsize = 9999;
 	int edgefact = 16;
+	vector<SubGraph*> neighbors;
 };
 
