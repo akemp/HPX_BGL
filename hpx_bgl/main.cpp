@@ -109,43 +109,44 @@ int main()
 	}
 	{
 		cout << "Running accuracy tests.\n";
-		
+		{
 
 			hpx::util::high_resolution_timer t;
 			graph_manager hw;// = graph_manager::create(hpx::find_here());
-		  hw.set(nodes, grainsize, ind, starts.size());
-		hpx::util::high_resolution_timer t1;
-		hw.pbfs_search(starts);
-		double elapsed = t.elapsed();
-		double elapsed1 = t1.elapsed();
-		cout << elapsed << "s for parallel component\n";
-		cout << elapsed1 << "s search time for parallel component\n";
-		for (int j = 0; j < starts.size(); ++j)
-		{
-		  
-			for (int i = 0; i < counts[j].size(); ++i)
+			hw.set(nodes, grainsize, ind, starts.size());
+			hpx::util::high_resolution_timer t1;
+			hw.pbfs_search(starts);
+			double elapsed = t.elapsed();
+			double elapsed1 = t1.elapsed();
+			cout << elapsed << "s for parallel component\n";
+			cout << elapsed1 << "s search time for parallel component\n";
+			for (int j = 0; j < starts.size(); ++j)
 			{
-				int sample = counts[j][i].first;
-				int count = 0;
-				while (sample != starts[j])
-				{
-					count++;
-					if (sample == -1)
-					{
-						count = -1;
-						break;
-					}
-					//cout << sample << "-" << sub.pennants[sample].dist << " ";
-					sample = hw.getval(sample, j);
-					if (counts[j][i].second < count)
-						break;
-				}
-				if (counts[j][i].second != count)
-					cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
-				//cout << endl;
 
-		  }
-	  }
+				for (int i = 0; i < counts[j].size(); ++i)
+				{
+					int sample = counts[j][i].first;
+					int count = 0;
+					while (sample != starts[j])
+					{
+						count++;
+						if (sample == -1)
+						{
+							count = -1;
+							break;
+						}
+						//cout << sample << "-" << sub.pennants[sample].dist << " ";
+						sample = hw.getval(sample, j);
+						if (counts[j][i].second < count)
+							break;
+					}
+					if (counts[j][i].second != count)
+						cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+					//cout << endl;
+
+				}
+			}
+		}
 	  {
 		  hpx::util::high_resolution_timer t;
 		  t.restart();
