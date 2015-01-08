@@ -46,14 +46,14 @@ struct SubGraph
 		name = get(bool_name_t(), g);
 		multireset(starts);
 	}
-	vector<pair<int,int>> bfs_search(vector<pair<int,int>>& indices, int loc)
+	vector<pair<int,int>> bfs_search(vector<pair<int,int>> indices, int loc)
 	{
 		vector<pair<int,int>> q;
 		property_map < BoolGraph, vertex_index_t >::type
 			index_map = get(vertex_index, g);
 		for (int i = 0; i < indices.size(); ++i)
 		{
-			int parent = indices[i].first;
+			int parent = (indices)[i].first;
 			name[parent][loc] = true;
 			if (parts[parent] != part)
 				continue;
@@ -119,16 +119,14 @@ struct MultiComponent
 				{
 					int last = spot;
 					spot += size;
+					vector<pair<int, int>> input;
+					if (spot < starter.size())
+						input = vector<pair<int, int>>(it, it + size);
+					else
+						input = vector<pair<int, int>>(it, it + starter.size() - last);
 					for (int j = 0; j < graphs.size(); ++j)
 					{
-						if (spot < starter.size())
-						{
-							futs.push_back(hpx::async(&bfs_search_act, &graphs[j], vector<pair<int, int>>(it, it + size), i));
-						}
-						else
-						{
-							futs.push_back(hpx::async(&bfs_search_act, &graphs[j], vector<pair<int, int>>(it, it + starter.size()-last), i));
-						}
+						futs.push_back(hpx::async(&bfs_search_act, &graphs[j], input, i));
 					}
 					if (spot >= starter.size())
 					break;
@@ -295,7 +293,9 @@ int main()
 						break;
 					}
 					//cout << sample << "-" << sub.pennants[sample].dist << " ";
-					sample = hw.getval(sample,j);
+					sample = hw.getval(sample, j);
+					if (counts[j][i].second < count)
+						break;
 				}
 				if (counts[j][i].second != count)
 					cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
@@ -316,6 +316,7 @@ int main()
 		  cout << elapsed << "s for highly parallel\n";
 		  cout << elapsed1 << "s search time for highly parallel\n";
 
+
 		  for (int j = 0; j < starts.size(); ++j)
 		  {
 			  for (int i = 0; i < counts[j].size(); ++i)
@@ -332,6 +333,8 @@ int main()
 					  }
 					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
 					  sample = hw.getmultival(sample, j);
+					  if (counts[j][i].second < count)
+						  break;
 				  }
 				  if (counts[j][i].second != count)
 					  cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
@@ -373,6 +376,8 @@ int main()
 						}
 						//cout << sample << "-" << sub.pennants[sample].dist << " ";
 						sample = hw.getmultival(sample, j);
+						if (counts[j][i].second < count)
+							break;
 					}
 					if (counts[j][i].second != count)
 						cout << "Counts not equal! " << count << " for pbfs != " << counts[j][i].second << " for bfs!\n";
