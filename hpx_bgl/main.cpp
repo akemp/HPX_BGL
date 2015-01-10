@@ -70,7 +70,7 @@ int main()
 	cout << "Data structures set. Running serial search.\n";
 	int nverts;
 	{
-		graph_manager hw;// = graph_manager::create(hpx::find_here());
+		graph_manager hw;// = graph_manager::create(std::find_here());
 		hw.setmulti(nodes, grainsize, ind, starts.size());
 		nverts = hw.getnum();
 		randnodes = boost::random::uniform_int_distribution<>(0, nverts - 1);
@@ -112,7 +112,7 @@ int main()
 		{
 
 			hpx::util::high_resolution_timer t;
-			graph_manager hw;// = graph_manager::create(hpx::find_here());
+			graph_manager hw;// = graph_manager::create(std::find_here());
 			hw.set(nodes, grainsize, ind, starts.size());
 			hpx::util::high_resolution_timer t1;
 			hw.pbfs_search(starts);
@@ -137,11 +137,13 @@ int main()
 						}
 						//cout << sample << "-" << sub.pennants[sample].dist << " ";
 						sample = hw.getval(sample, j);
-						if (counts[j][i].second < count)
+						if (counts[j][i].second < count - 10)
 							break;
 					}
 					if (counts[j][i].second != count)
+					{
 						cout << "Counts not equal! " << count << " for bfs != " << counts[j][i].second << " for pbfs!\n";
+					}
 					//cout << endl;
 
 				}
@@ -150,7 +152,7 @@ int main()
 	  {
 		  hpx::util::high_resolution_timer t;
 		  t.restart();
-		  graph_manager hw;// = graph_manager::create(hpx::find_here());
+		  graph_manager hw;// = graph_manager::create(std::find_here());
 		  hw.setmulti(nodes, grainsize, ind, starts.size());
 		  hpx::util::high_resolution_timer t1;
 		  hw.multival(starts);
@@ -177,7 +179,7 @@ int main()
 					  }
 					  //cout << sample << "-" << sub.pennants[sample].dist << " ";
 					  sample = hw.getmultival(sample, j);
-					  if (counts[j][i].second < count)
+					  if (counts[j][i].second < count - 10)
 						  break;
 				  }
 				  if (counts[j][i].second != count)
@@ -191,7 +193,7 @@ int main()
 			hpx::util::high_resolution_timer t;
 			t.restart();
 			//MultiComponent(vector<int> parts, vector<vector<int>> nodes, int size, int edge, int starts, int nparts)
-			MultiComponent hw;// = graph_manager::create(hpx::find_here());
+			MultiComponent hw;// = graph_manager::create(std::find_here());
 
 			//MultiComponent(vector<int> parts, vector<vector<int>> nodes, int size, int edge, int starts, int nparts)
 			hw.set(parts, nodes, grainsize, ind, starts.size(), nparts);
@@ -220,7 +222,7 @@ int main()
 						}
 						//cout << sample << "-" << sub.pennants[sample].dist << " ";
 						sample = hw.getmultival(sample, j);
-						if (counts[j][i].second < count)
+						if (counts[j][i].second < count - 10)
 							break;
 					}
 					if (counts[j][i].second != count)
@@ -235,7 +237,7 @@ int main()
 	{
 		hpx::util::high_resolution_timer t;
 		t.restart();
-		graph_manager hw;// = graph_manager::create(hpx::find_here());
+		graph_manager hw;// = graph_manager::create(std::find_here());
 		hw.setmulti(nodes, grainsize, ind, starts.size());
 
 		hpx::util::high_resolution_timer t1;
