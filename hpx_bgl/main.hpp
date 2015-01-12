@@ -159,6 +159,23 @@ struct GraphComponent :
     void mpbfs(int index, int loc)
     {
         name[index][loc] = index;
+        int size = num_vertices(g);
+        MultiGraph* ptr = &g;
+        vector<Edge> out_bag;
+        bool move = true;
+        while (move)
+        {
+            move = false;
+            out_bag = process_layor_multi_bottomup(loc, 0, size, ptr);
+            for (int i = 0; i < out_bag.size(); ++i)
+            {
+                Edge sam = out_bag[i];
+                name[sam.first][loc] = sam.second;
+            }
+            if (out_bag.size() > 0)
+                move = true;
+        }
+        /*
         vector<int> v;
         int dist = 0;
         v.push_back(index);
@@ -189,7 +206,33 @@ struct GraphComponent :
                 children.insert(children.end(), future.begin(), future.end());
             }
             v = children;
+        }*/
+    }
+    static vector<Edge> process_layor_multi_bottomup(int loc, int start, int size, MultiGraph* g)
+    {
+        property_map < MultiGraph, vertex_index_t >::type
+            index_map = get(vertex_index, *g);
+        property_map<MultiGraph, multi_name_t>::type
+            name = get(multi_name_t(), *g);
+        vector<Edge> out_bag;
+        int count = 0;
+        for (int i = 0; i < size; ++i)
+        {
+            int val = i + start;
+            graph_traits < MultiGraph >::adjacency_iterator ai, a_end;
+
+            if (name[val][loc] >= 0)
+                continue;
+            for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
+            {
+                int ind = get(index_map, *ai);
+                if (name[ind][loc] < 0)
+                    continue;
+                //name[val][loc] = ind;
+                out_bag.push_back(Edge(val, ind));
+            }
         }
+        return out_bag;
     }
     int getmultival(int index, int i)
     {
