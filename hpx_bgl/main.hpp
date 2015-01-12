@@ -161,19 +161,39 @@ struct GraphComponent :
         name[index][loc] = index;
         int size = num_vertices(g);
         MultiGraph* ptr = &g;
-        vector<Edge> out_bag;
         bool move = true;
         while (move)
         {
-            move = false;
-            out_bag = process_layor_multi_bottomup(loc, 0, size, ptr);
-            for (int i = 0; i < out_bag.size(); ++i)
+			move = false;
+			vector<hpx::future<vector<Edge>>> futures;
+			futures.reserve(size / grainsize + 1);
+
+			{
+				for (int i = 0; i < size; i += grainsize)
+				{
+					if (i + grainsize < size)
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi_bottomup,
+						loc, i, grainsize, ptr)));
+					else
+					{
+						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi_bottomup,
+							loc, i, (size - i), ptr)));
+						break;
+					}
+				}
+			}
+			hpx::wait_all(futures);
+            for (int i = 0; i < futures.size(); ++i)
             {
-                Edge sam = out_bag[i];
-                name[sam.first][loc] = sam.second;
+				vector<Edge> out_bag = futures[i].get();
+				for (int j = 0; j < out_bag.size(); ++j)
+				{
+					Edge sam = out_bag[j];
+					name[sam.first][loc] = sam.second;
+				}
+				if (out_bag.size() > 0)
+					move = true;
             }
-            if (out_bag.size() > 0)
-                move = true;
         }
         /*
         vector<int> v;
