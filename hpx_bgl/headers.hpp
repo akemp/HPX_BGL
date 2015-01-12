@@ -112,7 +112,7 @@ struct GraphComponent
 
 	void multival(vector<int> starts, bool sequential)
 	{
-		if (false)
+		if (!sequential)
 		{
 			vector<hpx::thread> futures;
 			int i = 0;
