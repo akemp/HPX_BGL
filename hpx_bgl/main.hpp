@@ -60,13 +60,8 @@ struct EdgeBag
 	}
 	pair<Edge,int> get()
 	{
-		pair<Edge,int> index;
 		locker(true);
-		if (v.size() <= 0)
-		{
-			locker(false);
-			return pair<Edge, int>(Edge(-1, -1), -1);
-		}
+		pair<Edge,int> index;
 		index = v.front();
 		v.erase(v.begin());
 		locker(false);
@@ -74,8 +69,8 @@ struct EdgeBag
 	}
 	int size()
 	{
-		int retval = 0;
 		locker(true);
+		int retval = 0;
 		retval = v.size();
 		locker(false);
 		return retval;
@@ -138,10 +133,48 @@ struct SubGraph
 	{
 		if (v[loc].size() <= 0)
 			return true;
-		pair<Edge, int> val = v[loc].get();
-		if (val.second < 0)
-			return true;
-		bfs_search(val.first.first, val.first.second, loc, val.second);
+		if (!lock(loc, false))
+		{
+			return false;
+		}
+
+		property_map < BoolGraph, vertex_index_t >::type
+			index_map = get(vertex_index, g);
+		int parent;
+		while (v[loc].size() > 0)
+		{
+			pair<Edge, int> val = v[loc].get();
+			Edge sample = val.first;
+			parent = sample.first;
+			if (val.second > dists[parent][loc])
+				continue;
+			dists[parent][loc] = val.second;
+			name[parent][loc] = sample.second;
+			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
+			for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
+			{
+				int ind = get(index_map, *ai);
+				if (dists[ind][loc] <= dists[parent][loc] + 1)
+					continue;
+
+				dists[ind][loc] = dists[parent][loc] + 1;
+				name[ind][loc] = parent;
+				int spot = parts[ind];
+				if (spot != part)
+				{
+					sample = Edge(ind, parent);
+					int indexer = parts[sample.first];
+					b[loc].add(
+						std::shared_future<void>(std::async(
+						&bfs_search_act, sample.first, sample.second, loc, dists[sample.first][loc], neighbors[indexer])
+						)
+						);
+					continue;
+				}
+				v[loc].add(pair<Edge, int>(Edge(ind, parent), dists[parent][loc] + 1));
+			}
+		}
+		lock(loc, true);
 		return false;
 	}
 	void bfs_search(int index, int parent, int loc, int dist)
