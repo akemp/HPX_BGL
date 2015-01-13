@@ -29,19 +29,23 @@ struct ThreadBag
 	}
 	void collect()
 	{
+		int count = 0;
 		for (int j = 0; j < threads.size(); ++j)
 		{
 			if (threads[j].valid())
 				threads[j].wait();
+			++count;
 		}
-		threads = vector<std::shared_future<void>>();
+		collected = count;
+		//threads = vector<std::shared_future<void>>();
 	}
+	int collected = 0;
 };
 
 struct EdgeBag
 {
 	vector<pair<Edge, int>> v;
-
+	int spot = 0;
 	static void locker(bool lock)
 	{
 		static std::mutex m;
@@ -62,8 +66,8 @@ struct EdgeBag
 	{
 		locker(true);
 		pair<Edge,int> index;
-		index = v.front();
-		v.erase(v.begin());
+		index = v[spot];
+		++spot;
 		locker(false);
 		return index;
 	}
@@ -71,7 +75,7 @@ struct EdgeBag
 	{
 		locker(true);
 		int retval = 0;
-		retval = v.size();
+		retval = v.size()-spot;
 		locker(false);
 		return retval;
 		
@@ -244,7 +248,7 @@ struct SubGraph
 	}
 	bool nothreads(int loc)
 	{
-		if (b[loc].threads.size() <= 0)
+		if (b[loc].threads.size()-b[loc].collected <= 0)
 		{
 			if (lock(loc, false))
 			{
