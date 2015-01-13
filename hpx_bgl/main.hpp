@@ -178,16 +178,19 @@ struct GraphComponent :
 						continue;
 					indices.push_back(count-1);
 					if (i + grainsize < size)
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi_bottomup,
+						futures.push_back(hpx::async(
+						hpx::util::bind(&process_layor_multi_bottomup,
 						loc, i, grainsize, ptr)));
 					else
 					{
-						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi_bottomup,
+						futures.push_back(hpx::async(
+							hpx::util::bind(&process_layor_multi_bottomup,
 							loc, i, (size - i), ptr)));
 						break;
 					}
 				}
 			}
+
 			hpx::wait_all(futures);
             for (int i = 0; i < futures.size(); ++i)
             {
