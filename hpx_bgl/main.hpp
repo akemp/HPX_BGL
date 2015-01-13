@@ -40,7 +40,7 @@ struct ThreadBag
 
 struct EdgeBag
 {
-	vector<Edge> v;
+	vector<pair<Edge, int>> v;
 
 	static void locker(bool lock)
 	{
@@ -52,20 +52,20 @@ struct EdgeBag
 			
 	}
 
-	void add(Edge t)
+	void add(pair<Edge,int> t)
 	{
 		locker(true);
 		v.push_back(t);
 		locker(false);
 	}
-	Edge get()
+	pair<Edge,int> get()
 	{
-		Edge index;
+		pair<Edge,int> index;
 		locker(true);
 		if (v.size() <= 0)
 		{
 			locker(false);
-			return Edge(-1, -1);
+			return pair<Edge, int>(Edge(-1, -1), -1);
 		}
 		index = v.front();
 		v.erase(v.begin());
@@ -133,38 +133,54 @@ struct SubGraph
 			m[loc].unlock();
 		return true;
 	}
-
+	EdgeBag v[64];
+	bool bfs_init(int loc)
+	{
+		if (v[loc].size() <= 0)
+			return true;
+		pair<Edge, int> val = v[loc].get();
+		if (val.second < 0)
+			return true;
+		bfs_search(val.first.first, val.first.second, loc, val.second);
+		return false;
+	}
 	void bfs_search(int index, int parent, int loc, int dist)
 	{
-		while (!lock(loc, false))
+		if (!lock(loc, false))
 		{
 			//std::this_thread::sleep_for(std::chrono::microseconds(1000));
 			if (dists[index][loc] <= dist)
 			{
 				return;
 			}
+
+			v[loc].add(pair<Edge,int>(Edge(index, parent), dist));
+			return;
 		}
 		if (dists[index][loc] <= dist)
 		{
 			lock(loc, true);
 			return;
 		}
-		dists[index][loc] = dist;
-		name[index][loc] = parent;
-		EdgeBag v;
 		property_map < BoolGraph, vertex_index_t >::type
 		index_map = get(vertex_index, g);
-		v.add(Edge(index, parent));
-		while (v.size() > 0)
+		v[loc].add(pair<Edge, int>(Edge(index, parent), dist));
+		while (v[loc].size() > 0)
 		{
-			Edge sample = v.get();
+			pair<Edge, int> val = v[loc].get();
+			Edge sample = val.first;
 			parent = sample.first;
+			if (val.second > dists[parent][loc])
+				continue;
+			dists[parent][loc] = val.second;
+			name[parent][loc] = sample.second;
 			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
 			for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
 			{
 				int ind = get(index_map, *ai);
 				if (dists[ind][loc] <= dists[parent][loc] + 1)
 					continue;
+
 				dists[ind][loc] = dists[parent][loc] + 1;
 				name[ind][loc] = parent;
 				int spot = parts[ind];
@@ -179,7 +195,7 @@ struct SubGraph
 						);
 					continue;
 				}
-				v.add(Edge(ind, parent));
+				v[loc].add(pair<Edge, int>(Edge(ind, parent), dists[parent][loc] + 1));
 			}
 		}
 		lock(loc, true);
@@ -200,7 +216,7 @@ struct SubGraph
 			if (lock(loc, false))
 			{
 				lock(loc, true);
-				return true;
+				return bfs_init(loc);
 			}
 			return false;
 		}
