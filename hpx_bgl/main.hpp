@@ -34,6 +34,7 @@ struct ThreadBag
 			if (threads[j].valid())
 				threads[j].wait();
 		}
+		threads = vector<std::shared_future<void>>();
 	}
 };
 
@@ -80,7 +81,6 @@ struct EdgeBag
 		return retval;
 		
 	}
-
 };
 
 struct SubGraph
@@ -118,12 +118,27 @@ struct SubGraph
 	{
 		g->bfs_search(index, parent, loc, dist);
 	}
-	void bfs_search(int index, int parent, int loc, int dist)
+	ThreadBag b[64];
+
+	bool lock(int loc, bool unlock)
 	{
 		static std::mutex m[64];
-		while (!m[loc].try_lock())
+		if (!unlock)
 		{
-			std::this_thread::sleep_for(std::chrono::microseconds(1000));
+			if (!m[loc].try_lock())
+				return false;
+			return true;
+		}
+		else
+			m[loc].unlock();
+		return true;
+	}
+
+	void bfs_search(int index, int parent, int loc, int dist)
+	{
+		while (!lock(loc, false))
+		{
+			//std::this_thread::sleep_for(std::chrono::microseconds(1000));
 			if (dists[index][loc] <= dist)
 			{
 				return;
@@ -131,15 +146,14 @@ struct SubGraph
 		}
 		if (dists[index][loc] <= dist)
 		{
-			m[loc].unlock();
+			lock(loc, true);
 			return;
 		}
 		dists[index][loc] = dist;
 		name[index][loc] = parent;
 		EdgeBag v;
-		ThreadBag b;
 		property_map < BoolGraph, vertex_index_t >::type
-			index_map = get(vertex_index, g);
+		index_map = get(vertex_index, g);
 		v.add(Edge(index, parent));
 		while (v.size() > 0)
 		{
@@ -158,7 +172,7 @@ struct SubGraph
 				{
 					sample = Edge(ind, parent);
 					int indexer = parts[sample.first];
-					b.add(
+					b[loc].add(
 						std::shared_future<void>(std::async(
 						&bfs_search_act, sample.first, sample.second, loc, dists[sample.first][loc], neighbors[indexer])
 						)
@@ -168,7 +182,7 @@ struct SubGraph
 				v.add(Edge(ind, parent));
 			}
 		}
-		m[loc].unlock();
+		lock(loc, true);
 	};
 
 	int getnum()
@@ -178,6 +192,25 @@ struct SubGraph
 	int getval(int i, int index)
 	{
 		return name[i][index];
+	}
+	bool nothreads(int loc)
+	{
+		if (b[loc].threads.size() <= 0)
+		{
+			if (lock(loc, false))
+			{
+				lock(loc, true);
+				return true;
+			}
+			return false;
+		}
+		if (lock(loc, false))
+		{
+			lock(loc, true);
+			b[loc].collect();
+			return false;
+		}
+		return false;
 	}
 	property_map<BoolGraph, bool_name_t>::type
 		name;
@@ -218,6 +251,19 @@ struct MultiComponent
 	{
 		int index = (*vertexmap)[start];
 		(*graphs)[index].bfs_search(start, start, i, 0);
+		bool waiter = true;
+		while (waiter)
+		{
+			waiter = false;
+			for (int j = 0; j < graphs->size(); ++j)
+			{
+				if (!(*graphs)[j].nothreads(i))
+				{
+					waiter = true;
+					break;
+				}
+			}
+		}
 		for (int j = 0; j < vertexmap->size(); ++j)
 		{
 			index = (*vertexmap)[j];
