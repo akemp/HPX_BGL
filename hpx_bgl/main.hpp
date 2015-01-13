@@ -162,15 +162,21 @@ struct GraphComponent :
         int size = num_vertices(g);
         MultiGraph* ptr = &g;
         bool move = true;
+		vector<bool> use(size / grainsize + 1, true);
         while (move)
         {
 			move = false;
-			vector<hpx::future<vector<Edge>>> futures;
+			vector<hpx::future<pair<vector<Edge>, bool>>> futures;
 			futures.reserve(size / grainsize + 1);
-
+			vector<int> indices;
+			int count = 0;
 			{
 				for (int i = 0; i < size; i += grainsize)
 				{
+					count++;
+					if (!use[count - 1])
+						continue;
+					indices.push_back(count-1);
 					if (i + grainsize < size)
 						futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi_bottomup,
 						loc, i, grainsize, ptr)));
@@ -185,50 +191,22 @@ struct GraphComponent :
 			hpx::wait_all(futures);
             for (int i = 0; i < futures.size(); ++i)
             {
-				vector<Edge> out_bag = futures[i].get();
-				for (int j = 0; j < out_bag.size(); ++j)
+				pair<vector<Edge>, bool> out_bag = futures[i].get();
+				if (!out_bag.second)
 				{
-					Edge sam = out_bag[j];
+					use[indices[i]] = false;
+					continue;
+				}
+				move = true;
+				for (int j = 0; j < out_bag.first.size(); ++j)
+				{
+					Edge sam = out_bag.first[j];
 					name[sam.first][loc] = sam.second;
 				}
-				if (out_bag.size() > 0)
-					move = true;
             }
         }
-        /*
-        vector<int> v;
-        int dist = 0;
-        v.push_back(index);
-        MultiGraph* ptr = &g;
-        while (!v.empty())
-        {
-            vector<hpx::future<vector<int>>> futures;
-            futures.reserve(v.size() / grainsize + 1);
-            {
-                int i = 0;
-                for (vector<int>::iterator it = v.begin(); it < v.end(); it += grainsize)
-                {
-                    int last = i;
-                    i += grainsize;
-                    if (i < v.size())
-                        futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, vector<int>(it, it + grainsize), ptr)));
-                    else
-                    {
-                        futures.push_back(hpx::async(hpx::util::bind(&process_layor_multi, loc, vector<int>(it, it + (v.size() - last)), ptr)));
-                        break;
-                    }
-                }
-            }
-            vector<int> children;
-            for (int i = 0; i < futures.size(); ++i)
-            {
-                vector<int> future = futures[i].get();
-                children.insert(children.end(), future.begin(), future.end());
-            }
-            v = children;
-        }*/
     }
-    static vector<Edge> process_layor_multi_bottomup(int loc, int start, int size, MultiGraph* g)
+    static pair<vector<Edge>, bool> process_layor_multi_bottomup(int loc, int start, int size, MultiGraph* g)
     {
         property_map < MultiGraph, vertex_index_t >::type
             index_map = get(vertex_index, *g);
@@ -236,6 +214,7 @@ struct GraphComponent :
             name = get(multi_name_t(), *g);
         vector<Edge> out_bag;
         int count = 0;
+		bool contains = false;
         for (int i = 0; i < size; ++i)
         {
             int val = i + start;
@@ -243,6 +222,7 @@ struct GraphComponent :
 
             if (name[val][loc] >= 0)
                 continue;
+			contains = true;
             for (boost::tie(ai, a_end) = adjacent_vertices(val, *g); ai != a_end; ++ai)
             {
                 int ind = get(index_map, *ai);
@@ -252,7 +232,7 @@ struct GraphComponent :
                 out_bag.push_back(Edge(val, ind));
             }
         }
-        return out_bag;
+		return pair<vector<Edge>, bool>(out_bag, contains);
     }
     int getmultival(int index, int i)
     {
