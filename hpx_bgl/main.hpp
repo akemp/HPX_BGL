@@ -211,6 +211,10 @@ struct SubGraph
 				continue;
 			dists[parent][loc] = val.second;
 			name[parent][loc] = sample.second;
+			if (dists[sample.second][loc] > val.second - 1)
+			{
+				dists[sample.second][loc] = val.second - 1;
+			}
 			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
 			for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
 			{
