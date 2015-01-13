@@ -53,22 +53,21 @@ struct GraphComponent
 	{
 		int adder = grainsize;
 
-		vector<hpx::thread> futs;
+		vector<hpx::future<void>> futs;
 		Graph* ptr = &g;
 
 		for (int i = 0; i < num_vertices(g); i += adder)
 		{
 			if (i + adder < num_vertices(g))
 			{
-				futs.push_back(hpx::thread(&parreset, ptr, i, adder, toggled));
+				futs.push_back(hpx::async(&parreset, ptr, i, adder, toggled));
 			}
 			else
 			{
-				futs.push_back(hpx::thread(&parreset, ptr, i, num_vertices(g) - i, toggled));
+				futs.push_back(hpx::async(&parreset, ptr, i, num_vertices(g) - i, toggled));
 			}
 		}
-		for (int i = 0; i < futs.size(); ++i)
-			futs[i].join();
+		hpx::wait_all(futs);
 
 	}
 	void set(vector<vector<int>> nodes, int size, int edge, int starts)
@@ -114,7 +113,7 @@ struct GraphComponent
 	{
 		if (!sequential)
 		{
-			vector<hpx::thread> futures;
+			vector<hpx::future<void>> futures;
 			int i = 0;
 			int adder = 1;
 			for (vector<int>::iterator it = starts.begin(); it < starts.end(); it += adder)
@@ -123,16 +122,15 @@ struct GraphComponent
 				i += adder;
 				if (i < starts.size())
 				{
-					futures.push_back(hpx::thread(&runMp, it, last, adder, this));
+					futures.push_back(hpx::async(&runMp, it, last, adder, this));
 				}
 				else
 				{
-					futures.push_back(hpx::thread(&runMp, it, last, starts.size() - last, this));
+					futures.push_back(hpx::async(&runMp, it, last, starts.size() - last, this));
 					break;
 				}
 			}
-			for (int i = 0; i < futures.size(); ++i)
-				futures[i].join();
+			hpx::wait_all(futures);
 		}
 		else
 		{
