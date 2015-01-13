@@ -5,27 +5,33 @@ struct bool_name_t {
 	typedef boost::vertex_property_tag kind;
 };
 
-typedef boost::property<bool_name_t, std::vector<int> > BoolColor; //parent, color, partition, distance
+typedef boost::property<bool_name_t, std::vector<Edge> > BoolColor; //parent, color, partition, distance
 typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
 	BoolColor> BoolGraph;
+
+typedef struct SubGraph;
+static void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g);
 
 struct ThreadBag
 {
 	vector<std::shared_future<void>> threads;
-
+	
 	~ThreadBag()
 	{
-		for (int j = 0; j < threads.size(); ++j)
-		{
-			threads[j].wait();
-		}
 	}
-	void add(std::shared_future<void> t)
+	void add(std::vector<pair<Edge, Edge>> holder, int loc, vector<SubGraph*> neighbors)
 	{
-		static std::mutex m;
-		while (!m.try_lock());
-		threads.push_back(t);
-		m.unlock();
+		for (int i = 0; i < holder.size(); ++i)
+		{
+			pair<Edge, Edge> temp = holder[i];
+			Edge first = temp.first;
+			Edge second = temp.second;
+			threads.push_back(
+				std::shared_future<void>(std::async(
+				&bfs_search_act, first.first, first.second, loc, second.first, neighbors[second.second])
+				)
+				);
+		}
 	}
 	void collect()
 	{
@@ -33,7 +39,7 @@ struct ThreadBag
 		for (int j = 0; j < threads.size(); ++j)
 		{
 			if (threads[j].valid())
-				threads[j].wait();
+				threads[j].get();
 			++count;
 		}
 		collected = count;
@@ -89,7 +95,7 @@ struct SubGraph
 	{
 		for (int i = 0; i < num_vertices(g); ++i)
 		{
-			name[i] = vector<int>(starts, -1);
+			name[i] = vector<Edge>(starts, Edge(-1, 99999999));
 		}
 	}
 
@@ -110,12 +116,7 @@ struct SubGraph
 		edgefact = edge;
 
 		name = get(bool_name_t(), g);
-		dists = vector<vector<int>>(nodes.size(), vector<int>(starts, 99999999999999));
 		multireset(starts);
-	}
-	static void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g)
-	{
-		g->bfs_search(index, parent, loc, dist);
 	}
 	ThreadBag b[64];
 
@@ -133,6 +134,47 @@ struct SubGraph
 		return true;
 	}
 	EdgeBag v[64];
+	void search(int loc)
+	{
+		
+		property_map < BoolGraph, vertex_index_t >::type
+			index_map = get(vertex_index, g);
+		int parent;
+		vector<pair<Edge, Edge>> holder;
+		holder.reserve(128);
+		while (v[loc].size() > 0)
+		{
+			pair<Edge, int> val = v[loc].get();
+			parent = val.first.first;
+			if (val.second > name[parent][loc].second)
+				continue;
+			name[parent][loc] = Edge(val.first.second, val.second);
+			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
+			for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
+			{
+				int ind = get(index_map, *ai);
+				if (name[ind][loc].second <= val.second + 1)
+					continue;
+
+				name[ind][loc] = Edge(parent, val.second + 1);
+				int spot = parts[ind];
+				if (spot != part)
+				{
+					holder.push_back(pair<Edge, Edge>(Edge(ind, parent), Edge(val.second + 1, spot)));
+					if (holder.size() >= grainsize)
+					{
+						b[loc].add(holder, loc, neighbors);
+						holder = vector<pair<Edge, Edge>>();
+					}
+					continue;
+				}
+				v[loc].add(pair<Edge, int>(Edge(ind, parent), val.second + 1));
+			}
+		}
+		lock(loc, true);
+		if (holder.size() > 0)
+		b[loc].add(holder, loc, neighbors);
+	}
 	bool bfs_init(int loc)
 	{
 		if (v[loc].size() <= 0)
@@ -141,105 +183,41 @@ struct SubGraph
 		{
 			return false;
 		}
-
-		property_map < BoolGraph, vertex_index_t >::type
-			index_map = get(vertex_index, g);
-		int parent;
-		while (v[loc].size() > 0)
-		{
-			pair<Edge, int> val = v[loc].get();
-			Edge sample = val.first;
-			parent = sample.first;
-			if (val.second > dists[parent][loc])
-				continue;
-			dists[parent][loc] = val.second;
-			name[parent][loc] = sample.second;
-			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
-			for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
-			{
-				int ind = get(index_map, *ai);
-				if (dists[ind][loc] <= dists[parent][loc] + 1)
-					continue;
-
-				dists[ind][loc] = dists[parent][loc] + 1;
-				name[ind][loc] = parent;
-				int spot = parts[ind];
-				if (spot != part)
-				{
-					sample = Edge(ind, parent);
-					int indexer = parts[sample.first];
-					b[loc].add(
-						std::shared_future<void>(std::async(
-						&bfs_search_act, sample.first, sample.second, loc, dists[sample.first][loc], neighbors[indexer])
-						)
-						);
-					continue;
-				}
-				v[loc].add(pair<Edge, int>(Edge(ind, parent), dists[parent][loc] + 1));
-			}
-		}
-		lock(loc, true);
+		search(loc);
 		return false;
 	}
 	void bfs_search(int index, int parent, int loc, int dist)
 	{
 		if (!lock(loc, false))
 		{
-			//std::this_thread::sleep_for(std::chrono::microseconds(1000));
-			if (dists[index][loc] <= dist)
+			if (name[parent][loc].second > dist - 1)
+			{
+				name[parent][loc].second = dist-1;
+			}
+			if (name[index][loc].second <= dist)
 			{
 				return;
 			}
-
 			v[loc].add(pair<Edge,int>(Edge(index, parent), dist));
 			return;
 		}
-		if (dists[index][loc] <= dist)
+		if (name[index][loc].second <= dist)
 		{
+			if (name[parent][loc].second > dist - 1 && dist != 0)
+			{
+				name[parent][loc].second = dist - 1;
+			}
+
 			lock(loc, true);
 			return;
 		}
-		property_map < BoolGraph, vertex_index_t >::type
-		index_map = get(vertex_index, g);
-		v[loc].add(pair<Edge, int>(Edge(index, parent), dist));
-		while (v[loc].size() > 0)
+		if (name[parent][loc].second > dist - 1 && dist != 0)
 		{
-			pair<Edge, int> val = v[loc].get();
-			Edge sample = val.first;
-			parent = sample.first;
-			if (val.second > dists[parent][loc])
-				continue;
-			dists[parent][loc] = val.second;
-			name[parent][loc] = sample.second;
-			if (dists[sample.second][loc] > val.second - 1)
-			{
-				dists[sample.second][loc] = val.second - 1;
-			}
-			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
-			for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
-			{
-				int ind = get(index_map, *ai);
-				if (dists[ind][loc] <= dists[parent][loc] + 1)
-					continue;
-
-				dists[ind][loc] = dists[parent][loc] + 1;
-				name[ind][loc] = parent;
-				int spot = parts[ind];
-				if (spot != part)
-				{
-					sample = Edge(ind, parent);
-					int indexer = parts[sample.first];
-					b[loc].add(
-						std::shared_future<void>(std::async(
-						&bfs_search_act, sample.first, sample.second, loc, dists[sample.first][loc], neighbors[indexer])
-						)
-						);
-					continue;
-				}
-				v[loc].add(pair<Edge, int>(Edge(ind, parent), dists[parent][loc] + 1));
-			}
+			name[parent][loc].second = dist - 1;
 		}
-		lock(loc, true);
+
+		v[loc].add(pair<Edge, int>(Edge(index, parent), dist));
+		search(loc);
 	};
 
 	int getnum()
@@ -248,7 +226,7 @@ struct SubGraph
 	}
 	int getval(int i, int index)
 	{
-		return name[i][index];
+		return name[i][index].first;
 	}
 	bool nothreads(int loc)
 	{
@@ -278,9 +256,12 @@ struct SubGraph
 	vector<SubGraph*> neighbors;
 	int part;
 	bool done = false;
-	vector<vector<int>> dists;
 };
 
+static void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g)
+{
+	g->bfs_search(index, parent, loc, dist);
+}
 struct MultiComponent
 {
 	void set(vector<int> parts, vector<vector<int>> nodes, int size, int edge, int starts, int nparts)
