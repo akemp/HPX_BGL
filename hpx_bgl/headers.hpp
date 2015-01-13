@@ -11,7 +11,6 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
-#include <queue>
 #include "../metis/include/metis.h"
 
 #include <boost/random.hpp>
