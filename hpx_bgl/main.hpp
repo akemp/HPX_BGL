@@ -1,5 +1,6 @@
 
 #include "headers.hpp"
+#include <hpx/lcos/local/detail/condition_variable.hpp>
 
 struct bool_name_t {
 	typedef boost::vertex_property_tag kind;
@@ -10,35 +11,30 @@ typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
 	BoolColor> BoolGraph;
 
 typedef struct SubGraph;
-static void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g);
+void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g);
 
 struct ThreadBag
 {
 	vector<hpx::shared_future<void>> threads;
 	vector<SubGraph*> neighbors;
+	int loc = -1;
+	int count = 0;
+	int part = -1;
 	~ThreadBag()
 	{
-		collect();
 	}
-	void add(pair<Edge, Edge> holder, int loc)
+	static void add_action(pair<Edge, Edge> holder, ThreadBag* b)
 	{
-		//m.lock();
-		//for (int i = 0; i < holder.size(); ++i)
-		{
-			pair<Edge, Edge> temp = holder;
-			Edge first = temp.first;
-			Edge second = temp.second;
-			threads.push_back(
-				hpx::shared_future<void>(hpx::async(
-				&bfs_search_act, first.first, first.second, loc, second.first, neighbors[second.second])
-				)
-				);
-		}
-		//m.unlock();
+		b->add(holder);
 	}
-	void collect()
+	void add(pair<Edge, Edge> holder)
 	{
-		hpx::wait_all(threads);
+		pair<Edge, Edge> temp = holder;//holders[i];
+		Edge first = temp.first;
+		Edge second = temp.second;
+		threads.push_back(hpx::async(
+			&bfs_search_act, first.first, first.second, loc, second.first, neighbors[second.second])
+			);
 	}
 };
 
@@ -93,26 +89,16 @@ struct SubGraph
 		}
 		grainsize = size;
 		edgefact = edge;
-
+		
 		name = get(bool_name_t(), g);
 		multireset(starts);
 	}
 
-	bool lock(int loc, bool unlock)
+	void search(pair<Edge, int> sample, const int loc)
 	{
-		if (!unlock)
-		{
-			m[loc].lock();
-		}
-		else
-			m[loc].unlock();
-		return true;
-	}
-	void search(pair<Edge, int> sample, int loc)
-	{
-		lock(loc, false);
 		ThreadBag b;
 		b.neighbors = neighbors;
+		b.loc = loc;
 		EdgeBag v;
 		v.add(sample);
 		property_map < BoolGraph, vertex_index_t >::type
@@ -136,28 +122,21 @@ struct SubGraph
 				int spot = parts[ind];
 				if (spot != part)
 				{
-					//holder.push_back(pair<Edge, Edge>(Edge(ind, parent), Edge(val.second + 1, spot)));
-					//if (holder.size() >= grainsize)
-					{
-						b.add(pair<Edge, Edge>(Edge(ind, parent), Edge(val.second + 1, spot)), loc);
-						//holder = vector<pair<Edge, Edge>>();
-					}
+					b.add(pair<Edge, Edge>(Edge(ind, parent), Edge(val.second + 1, spot)));
 					continue;
 				}
 				v.add(pair<Edge, int>(Edge(ind, parent), val.second + 1));
 			}
 		}
-		lock(loc, true);
 	}
 	void bfs_search(int index, int parent, int loc, int dist)
 	{
 		if (name[index][loc].second <= dist)
 		{
-			if (name[parent][loc].second > dist - 1 && dist != 0)
+			if (name[parent][loc].second > dist - 1)
 			{
 				name[parent][loc].second = dist - 1;
 			}
-
 			return;
 		}
 		if (name[parent][loc].second > dist - 1 && dist != 0)
@@ -184,13 +163,12 @@ struct SubGraph
 	vector<int> parts;
 	vector<SubGraph*> neighbors;
 	int part;
-	hpx::lcos::local::mutex m[64];
 };
-
-static void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g)
+void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g)
 {
 	g->bfs_search(index, parent, loc, dist);
 }
+
 struct MultiComponent
 {
 	void set(vector<int> parts, vector<vector<int>> nodes, int size, int edge, int starts, int nparts)
@@ -210,17 +188,11 @@ struct MultiComponent
 		{
 			it->neighbors = neighbors;
 		}
-		parents = vector<vector<int>>(graphs.front().getnum(), vector<int>(starts, -1));
 	};
-	static void run(int start, int size, int i, vector<SubGraph*> graphs, vector<vector<int>>* parents, vector<int>* vertexmap)
+	static void run(int start, int size, int i, vector<SubGraph*> graphs, vector<int>* vertexmap)
 	{
 		int index = (*vertexmap)[start];
 		(graphs)[index]->bfs_search(start, start, i, 0);
-		for (int j = 0; j < vertexmap->size(); ++j)
-		{
-			index = (*vertexmap)[j];
-			(*parents)[j][i] = (graphs)[index]->getval(j, i);
-		}
 	}
 	void search(vector<int> starts)
 	{
@@ -229,17 +201,18 @@ struct MultiComponent
 		for (int i = 0; i < starts.size(); ++i)
 		{
 			int start = starts[i];
-			runs[i] = hpx::async(&run, start, size, i, neighbors, &parents, &vertexmap);
+			runs[i] = hpx::async(&run, start, size, i, neighbors, &vertexmap);
 		}
-		hpx::wait_all(runs);
+		hpx::finalize();
 	}
 	int getmultival(int index, int i)
 	{
-		return parents[index][i];
+		int start = vertexmap[index];
+		return graphs[start].getval(index,i);
 	}
 	deque<SubGraph> graphs;
 	vector<int> vertexmap;
-	vector<vector<int>> parents;
+	//vector<vector<int>> parents;
 	int grainsize = 9999;
 	int edgefact = 16;
 	vector<SubGraph*> neighbors;

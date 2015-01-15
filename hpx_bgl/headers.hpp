@@ -8,16 +8,14 @@
 #include <hpx/include/components.hpp>
 #include <hpx/include/actions.hpp>
 #include <hpx/include/iostreams.hpp>
+#include <hpx/lcos/when_all.hpp>
 #include <fstream>
 #include <iostream>
 #include <vector>
 #include "../metis/include/metis.h"
 
 #include <boost/random.hpp>
-#include <boost/format.hpp>
 #include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/breadth_first_search.hpp>
-#include "high_resolution_timer.hpp"
 
 
 typedef std::pair < int, int > Edge;
