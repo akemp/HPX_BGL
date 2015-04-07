@@ -1,6 +1,5 @@
 
 #include "headers.hpp"
-#include <hpx/lcos/local/detail/condition_variable.hpp>
 
 struct bool_name_t {
 	typedef boost::vertex_property_tag kind;
@@ -13,42 +12,71 @@ typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
 typedef struct SubGraph;
 void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g);
 
+typedef hpx::lcos::local::spinlock locker;
+
 struct ThreadBag
 {
 	vector<hpx::shared_future<void>> threads;
 	vector<SubGraph*> neighbors;
+	vector<pair<Edge, Edge>> edges;
 	int loc = -1;
 	int count = 0;
 	int part = -1;
+	int grainsize;
+	ThreadBag(int gs)
+	{
+		grainsize = gs;
+		edges.reserve(grainsize);
+	}
 	~ThreadBag()
 	{
+		collect();
 	}
-	static void add_action(pair<Edge, Edge> holder, ThreadBag* b)
+	void collect()
 	{
-		b->add(holder);
+
+		for (int i = 0; i < edges.size(); ++i)
+		{
+			pair<Edge, Edge> temp = edges[i];
+			Edge first = temp.first;
+			Edge second = temp.second;
+			hpx::async(
+				&bfs_search_act, first.first, first.second, loc, second.first, neighbors[second.second]);
+		}
 	}
 	void add(pair<Edge, Edge> holder)
 	{
-		pair<Edge, Edge> temp = holder;//holders[i];
-		Edge first = temp.first;
-		Edge second = temp.second;
-		threads.push_back(hpx::async(
-			&bfs_search_act, first.first, first.second, loc, second.first, neighbors[second.second])
-			);
+		edges.push_back(holder);
+		if (edges.size() >= grainsize)
+		{
+			for (int i = 0; i < edges.size(); ++i)
+			{
+				pair<Edge, Edge> temp = edges[i];
+				Edge first = temp.first;
+				Edge second = temp.second;
+				hpx::async(
+					&bfs_search_act, first.first, first.second, loc, second.first, neighbors[second.second]);
+			}
+			edges = vector<pair<Edge, Edge>>();
+			edges.reserve(grainsize);
+		}
 	}
 };
 
 struct EdgeBag
 {
+	mutable locker l;
 	vector<pair<Edge, int>> v;
 	int spot = 0;
 
 	void add(pair<Edge,int> t)
 	{
+		locker::scoped_lock m(l);
 		v.push_back(t);
 	}
 	pair<Edge,int> get()
 	{
+		locker::scoped_lock m(l);
 		pair<Edge,int> index;
 		index = v[spot];
 		++spot;
@@ -56,6 +84,7 @@ struct EdgeBag
 	}
 	int size()
 	{
+		locker::scoped_lock m(l);
 		int retval = 0;
 		retval = v.size() - spot;
 		return retval;
@@ -94,19 +123,21 @@ struct SubGraph
 		multireset(starts);
 	}
 
+	EdgeBag v[64];
 	void search(pair<Edge, int> sample, const int loc)
 	{
-		ThreadBag b;
+		v[loc].add(sample);
+		if (!l[loc].try_lock())
+			return;
+		ThreadBag b(grainsize);
 		b.neighbors = neighbors;
 		b.loc = loc;
-		EdgeBag v;
-		v.add(sample);
 		property_map < BoolGraph, vertex_index_t >::type
 			index_map = get(vertex_index, g);
 		int parent;
-		while (v.size() > 0)
+		while (v[loc].size() > 0)
 		{
-			pair<Edge, int> val = v.get();
+			pair<Edge, int> val = v[loc].get();
 			parent = val.first.first;
 			if (val.second > name[parent][loc].second)
 				continue;
@@ -125,9 +156,10 @@ struct SubGraph
 					b.add(pair<Edge, Edge>(Edge(ind, parent), Edge(val.second + 1, spot)));
 					continue;
 				}
-				v.add(pair<Edge, int>(Edge(ind, parent), val.second + 1));
+				v[loc].add(pair<Edge, int>(Edge(ind, parent), val.second + 1));
 			}
 		}
+		l[loc].unlock();
 	}
 	void bfs_search(int index, int parent, int loc, int dist)
 	{
@@ -162,6 +194,7 @@ struct SubGraph
 	int edgefact = 16;
 	vector<int> parts;
 	vector<SubGraph*> neighbors;
+	mutable locker l[64];
 	int part;
 };
 void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g)
@@ -203,6 +236,7 @@ struct MultiComponent
 			int start = starts[i];
 			runs[i] = hpx::async(&run, start, size, i, neighbors, &vertexmap);
 		}
+		hpx::wait_all(runs);
 		hpx::finalize();
 	}
 	int getmultival(int index, int i)

@@ -33,9 +33,6 @@ int main()
 	//cin >> acctest;
     nnodes = (uint64_t)(1) << scale;
 	//
-	int nparts = 10;
-	cout << "Enter partitions: ";
-	cin >> nparts;
 
 
 	//Edges edges;
@@ -57,7 +54,7 @@ int main()
 	vector<int> xadj, adjncy;
 	toCSR(nodes, xadj, adjncy);
 	vector<int> parts(nodes.size());
-	get_parts(xadj, adjncy, parts, nparts);
+	//get_parts(xadj, adjncy, parts, nparts);
 	cout << "Running tests.\n";
 
 
@@ -189,48 +186,6 @@ int main()
 		  }
 	  }
 
-		{
-			hpx::util::high_resolution_timer t;
-			t.restart();
-			//MultiComponent(vector<int> parts, vector<vector<int>> nodes, int size, int edge, int starts, int nparts)
-			MultiComponent hw;// = graph_manager::create(std::find_here());
-
-			//MultiComponent(vector<int> parts, vector<vector<int>> nodes, int size, int edge, int starts, int nparts)
-			hw.set(parts, nodes, grainsize, ind, starts.size(), nparts);
-
-			hpx::util::high_resolution_timer t1;
-			{
-				hw.search(starts);
-			}
-			double elapsed = t.elapsed();
-			double elapsed1 = t1.elapsed();
-			cout << elapsed << "s for partitioned\n";
-			cout << elapsed1 << "s search time for partitioned\n";
-			for (int j = 0; j < starts.size(); ++j)
-			{
-				for (int i = 0; i < counts[j].size(); ++i)
-				{
-					int sample = counts[j][i].first;
-					int count = 0;
-					while (sample != starts[j])
-					{
-						count++;
-						if (sample == -1)
-						{
-							count = -1;
-							break;
-						}
-						//cout << sample << "-" << sub.pennants[sample].dist << " ";
-						sample = hw.getmultival(sample, j);
-						if (counts[j][i].second < count - 10)
-							break;
-					}
-					if (counts[j][i].second != count)
-						cout << "Counts not equal! " << count << " for pbfs != " << counts[j][i].second << " for bfs!\n";
-					//cout << endl;
-				}
-			}
-		}
 		cout << "Accuracy tests complete.\n";
 	}
 	cout << "Serial comparison:\n";
@@ -251,6 +206,7 @@ int main()
 	}
 
 	int s;
+	exit(0);
 	cin >> s;
 	return 0;
 }

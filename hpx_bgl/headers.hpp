@@ -2,13 +2,13 @@
 #define HEADERS_BGL
 
 #include <hpx/hpx_main.hpp>
-#include <hpx/include/runtime.hpp>
-#include <hpx/include/thread_executors.hpp>
+//#include <hpx/include/runtime.hpp>
+//#include <hpx/include/thread_executors.hpp>
 #include <hpx/util/high_resolution_timer.hpp>
 #include <hpx/include/components.hpp>
-#include <hpx/include/actions.hpp>
-#include <hpx/include/iostreams.hpp>
-#include <hpx/lcos/when_all.hpp>
+//#include <hpx/include/actions.hpp>
+//#include <hpx/include/iostreams.hpp>
+//#include <hpx/lcos/when_all.hpp>
 #include <fstream>
 #include <iostream>
 #include <vector>
