@@ -1,254 +1,419 @@
 
 #include "headers.hpp"
 
-struct bool_name_t {
-	typedef boost::vertex_property_tag kind;
-};
+//
+//=======================================================================
+// Copyright 1997, 1998, 1999, 2000 University of Notre Dame.
+// Authors: Andrew Lumsdaine, Lie-Quan Lee, Jeremy G. Siek
+//
+// Distributed under the Boost Software License, Version 1.0. (See
+// accompanying file LICENSE_1_0.txt or copy at
+// http://www.boost.org/LICENSE_1_0.txt)
+//=======================================================================
+//
+#ifndef BOOST_GRAPH_BREADTH_FIRST_SEARCH_HPP
+#define BOOST_GRAPH_BREADTH_FIRST_SEARCH_HPP
 
-typedef boost::property<bool_name_t, std::vector<Edge> > BoolColor; //parent, color, partition, distance
-typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
-	BoolColor> BoolGraph;
+/*
+Breadth First Search Algorithm (Cormen, Leiserson, and Rivest p. 470)
+*/
+#include <boost/config.hpp>
+#include <vector>
+#include <boost/pending/queue.hpp>
+#include <boost/graph/graph_traits.hpp>
+#include <boost/graph/graph_concepts.hpp>
+#include <boost/graph/visitors.hpp>
+#include <boost/graph/named_function_params.hpp>
+#include <boost/graph/overloading.hpp>
+#include <boost/graph/graph_concepts.hpp>
+#include <boost/graph/two_bit_color_map.hpp>
+#include <boost/concept/assert.hpp>
 
-typedef struct SubGraph;
-void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g);
+#ifdef BOOST_GRAPH_USE_MPI
+#include <boost/graph/distributed/concepts.hpp>
+#endif // BOOST_GRAPH_USE_MPI
 
-typedef hpx::lcos::local::spinlock locker;
+namespace boost {
 
-struct ThreadBag
-{
-	vector<hpx::shared_future<void>> threads;
-	vector<SubGraph*> neighbors;
-	vector<pair<Edge, Edge>> edges;
-	int loc = -1;
-	int count = 0;
-	int part = -1;
-	int grainsize;
-	ThreadBag(int gs)
-	{
-		grainsize = gs;
-		edges.reserve(grainsize);
-	}
-	~ThreadBag()
-	{
-		collect();
-	}
-	void collect()
-	{
-
-		for (int i = 0; i < edges.size(); ++i)
-		{
-			pair<Edge, Edge> temp = edges[i];
-			Edge first = temp.first;
-			Edge second = temp.second;
-			hpx::async(
-				&bfs_search_act, first.first, first.second, loc, second.first, neighbors[second.second]);
+	template <class Visitor, class Graph>
+	struct BFSVisitorConcept {
+		void constraints() {
+			BOOST_CONCEPT_ASSERT((CopyConstructibleConcept<Visitor>));
+			vis.initialize_vertex(u, g);
+			vis.discover_vertex(u, g);
+			vis.examine_vertex(u, g);
+			vis.examine_edge(e, g);
+			vis.tree_edge(e, g);
+			vis.non_tree_edge(e, g);
+			vis.gray_target(e, g);
+			vis.black_target(e, g);
+			vis.finish_vertex(u, g);
 		}
-	}
-	void add(pair<Edge, Edge> holder)
+		Visitor vis;
+		Graph g;
+		typename graph_traits<Graph>::vertex_descriptor u;
+		typename graph_traits<Graph>::edge_descriptor e;
+	};
+
+
+	// Multiple-source version
+	template <class IncidenceGraph, class Buffer, class BFSVisitor,
+	class ColorMap, class SourceIterator>
+		void breadth_first_visit
+		(const IncidenceGraph& g,
+		SourceIterator sources_begin, SourceIterator sources_end,
+		Buffer& Q, BFSVisitor vis, ColorMap color)
 	{
-		edges.push_back(holder);
-		if (edges.size() >= grainsize)
-		{
-			for (int i = 0; i < edges.size(); ++i)
-			{
-				pair<Edge, Edge> temp = edges[i];
-				Edge first = temp.first;
-				Edge second = temp.second;
-				hpx::async(
-					&bfs_search_act, first.first, first.second, loc, second.first, neighbors[second.second]);
-			}
-			edges = vector<pair<Edge, Edge>>();
-			edges.reserve(grainsize);
+		BOOST_CONCEPT_ASSERT((IncidenceGraphConcept<IncidenceGraph>));
+		typedef graph_traits<IncidenceGraph> GTraits;
+		typedef typename GTraits::vertex_descriptor Vertex;
+		BOOST_CONCEPT_ASSERT((BFSVisitorConcept<BFSVisitor, IncidenceGraph>));
+		BOOST_CONCEPT_ASSERT((ReadWritePropertyMapConcept<ColorMap, Vertex>));
+		typedef typename property_traits<ColorMap>::value_type ColorValue;
+		typedef color_traits<ColorValue> Color;
+		typename GTraits::out_edge_iterator ei, ei_end;
+
+		for (; sources_begin != sources_end; ++sources_begin) {
+			Vertex s = *sources_begin;
+			put(color, s, Color::gray());           vis.discover_vertex(s, g);
+			Q.push(s);
 		}
-	}
-};
-
-struct EdgeBag
-{
-	mutable locker l;
-	vector<pair<Edge, int>> v;
-	int spot = 0;
-
-	void add(pair<Edge,int> t)
-	{
-		locker::scoped_lock m(l);
-		v.push_back(t);
-	}
-	pair<Edge,int> get()
-	{
-		locker::scoped_lock m(l);
-		pair<Edge,int> index;
-		index = v[spot];
-		++spot;
-		return index;
-	}
-	int size()
-	{
-		locker::scoped_lock m(l);
-		int retval = 0;
-		retval = v.size() - spot;
-		return retval;
-		
-	}
-};
-
-struct SubGraph
-{
-
-	void multireset(int starts)
-	{
-		for (int i = 0; i < num_vertices(g); ++i)
-		{
-			name[i] = vector<Edge>(starts, Edge(-1, 99999999));
-		}
-	}
-
-	void set(vector<vector<int>> nodes, int size, int edge, int starts, int index, vector<int> map)
-	{
-		part = index;
-		parts = map;
-		for (int i = 0; i < nodes.size(); ++i)
-		{
-			for (int j = 0; j < nodes[i].size(); ++j)
-			{
-				int val = nodes[i][j];
-				if (parts[i] == part || parts[val] == part)
-					add_edge(i, val, g);
-			}
-		}
-		grainsize = size;
-		edgefact = edge;
-		
-		name = get(bool_name_t(), g);
-		multireset(starts);
-	}
-
-	EdgeBag v[64];
-	void search(pair<Edge, int> sample, const int loc)
-	{
-		v[loc].add(sample);
-		if (!l[loc].try_lock())
-			return;
-		ThreadBag b(grainsize);
-		b.neighbors = neighbors;
-		b.loc = loc;
-		property_map < BoolGraph, vertex_index_t >::type
-			index_map = get(vertex_index, g);
-		int parent;
-		while (v[loc].size() > 0)
-		{
-			pair<Edge, int> val = v[loc].get();
-			parent = val.first.first;
-			if (val.second > name[parent][loc].second)
-				continue;
-			name[parent][loc] = Edge(val.first.second, val.second);
-			graph_traits < BoolGraph >::adjacency_iterator ai, a_end;
-			for (boost::tie(ai, a_end) = adjacent_vertices(parent, g); ai != a_end; ++ai)
-			{
-				int ind = get(index_map, *ai);
-				if (name[ind][loc].second <= val.second + 1)
-					continue;
-
-				name[ind][loc] = Edge(parent, val.second + 1);
-				int spot = parts[ind];
-				if (spot != part)
-				{
-					b.add(pair<Edge, Edge>(Edge(ind, parent), Edge(val.second + 1, spot)));
-					continue;
+		while (!Q.empty()) {
+			Vertex u = Q.top(); Q.pop();            vis.examine_vertex(u, g);
+			for (boost::tie(ei, ei_end) = out_edges(u, g); ei != ei_end; ++ei) {
+				Vertex v = target(*ei, g);            vis.examine_edge(*ei, g);
+				ColorValue v_color = get(color, v);
+				if (v_color == Color::white()) {
+					vis.tree_edge(*ei, g);
+					put(color, v, Color::gray());       vis.discover_vertex(v, g);
+					Q.push(v);
 				}
-				v[loc].add(pair<Edge, int>(Edge(ind, parent), val.second + 1));
-			}
-		}
-		l[loc].unlock();
-	}
-	void bfs_search(int index, int parent, int loc, int dist)
+				else {
+					vis.non_tree_edge(*ei, g);
+					if (v_color == Color::gray())       vis.gray_target(*ei, g);
+					else                                vis.black_target(*ei, g);
+				}
+			} // end for
+			put(color, u, Color::black());          vis.finish_vertex(u, g);
+		} // end while
+	} // breadth_first_visit
+
+	// Single-source version
+	template <class IncidenceGraph, class Buffer, class BFSVisitor,
+	class ColorMap>
+		void breadth_first_visit
+		(const IncidenceGraph& g,
+		typename graph_traits<IncidenceGraph>::vertex_descriptor s,
+		Buffer& Q, BFSVisitor vis, ColorMap color)
 	{
-		if (name[index][loc].second <= dist)
+		typename graph_traits<IncidenceGraph>::vertex_descriptor sources[1] = { s };
+		breadth_first_visit(g, sources, sources + 1, Q, vis, color);
+	}
+
+
+	template <class VertexListGraph, class SourceIterator,
+	class Buffer, class BFSVisitor,
+	class ColorMap>
+		void breadth_first_search
+		(const VertexListGraph& g,
+		SourceIterator sources_begin, SourceIterator sources_end,
+		Buffer& Q, BFSVisitor vis, ColorMap color)
+	{
+		// Initialization
+		typedef typename property_traits<ColorMap>::value_type ColorValue;
+		typedef color_traits<ColorValue> Color;
+		typename boost::graph_traits<VertexListGraph>::vertex_iterator i, i_end;
+		for (boost::tie(i, i_end) = vertices(g); i != i_end; ++i) {
+			vis.initialize_vertex(*i, g);
+			put(color, *i, Color::white());
+		}
+		breadth_first_visit(g, sources_begin, sources_end, Q, vis, color);
+	}
+
+	template <class VertexListGraph, class Buffer, class BFSVisitor,
+	class ColorMap>
+		void breadth_first_search
+		(const VertexListGraph& g,
+		typename graph_traits<VertexListGraph>::vertex_descriptor s,
+		Buffer& Q, BFSVisitor vis, ColorMap color)
+	{
+		typename graph_traits<VertexListGraph>::vertex_descriptor sources[1] = { s };
+		breadth_first_search(g, sources, sources + 1, Q, vis, color);
+	}
+
+	namespace graph { struct bfs_visitor_event_not_overridden {}; }
+
+
+	template <class Visitors = null_visitor>
+	class bfs_visitor {
+	public:
+		bfs_visitor() { }
+		bfs_visitor(Visitors vis) : m_vis(vis) { }
+
+		template <class Vertex, class Graph>
+		graph::bfs_visitor_event_not_overridden
+			initialize_vertex(Vertex u, Graph& g)
 		{
-			if (name[parent][loc].second > dist - 1)
+			invoke_visitors(m_vis, u, g, ::boost::on_initialize_vertex());
+			return graph::bfs_visitor_event_not_overridden();
+		}
+
+		template <class Vertex, class Graph>
+		graph::bfs_visitor_event_not_overridden
+			discover_vertex(Vertex u, Graph& g)
+		{
+			invoke_visitors(m_vis, u, g, ::boost::on_discover_vertex());
+			return graph::bfs_visitor_event_not_overridden();
+		}
+
+		template <class Vertex, class Graph>
+		graph::bfs_visitor_event_not_overridden
+			examine_vertex(Vertex u, Graph& g)
+		{
+			invoke_visitors(m_vis, u, g, ::boost::on_examine_vertex());
+			return graph::bfs_visitor_event_not_overridden();
+		}
+
+		template <class Edge, class Graph>
+		graph::bfs_visitor_event_not_overridden
+			examine_edge(Edge e, Graph& g)
+		{
+			invoke_visitors(m_vis, e, g, ::boost::on_examine_edge());
+			return graph::bfs_visitor_event_not_overridden();
+		}
+
+		template <class Edge, class Graph>
+		graph::bfs_visitor_event_not_overridden
+			tree_edge(Edge e, Graph& g)
+		{
+			invoke_visitors(m_vis, e, g, ::boost::on_tree_edge());
+			return graph::bfs_visitor_event_not_overridden();
+		}
+
+		template <class Edge, class Graph>
+		graph::bfs_visitor_event_not_overridden
+			non_tree_edge(Edge e, Graph& g)
+		{
+			invoke_visitors(m_vis, e, g, ::boost::on_non_tree_edge());
+			return graph::bfs_visitor_event_not_overridden();
+		}
+
+		template <class Edge, class Graph>
+		graph::bfs_visitor_event_not_overridden
+			gray_target(Edge e, Graph& g)
+		{
+			invoke_visitors(m_vis, e, g, ::boost::on_gray_target());
+			return graph::bfs_visitor_event_not_overridden();
+		}
+
+		template <class Edge, class Graph>
+		graph::bfs_visitor_event_not_overridden
+			black_target(Edge e, Graph& g)
+		{
+			invoke_visitors(m_vis, e, g, ::boost::on_black_target());
+			return graph::bfs_visitor_event_not_overridden();
+		}
+
+		template <class Vertex, class Graph>
+		graph::bfs_visitor_event_not_overridden
+			finish_vertex(Vertex u, Graph& g)
+		{
+			invoke_visitors(m_vis, u, g, ::boost::on_finish_vertex());
+			return graph::bfs_visitor_event_not_overridden();
+		}
+
+		BOOST_GRAPH_EVENT_STUB(on_initialize_vertex, bfs)
+			BOOST_GRAPH_EVENT_STUB(on_discover_vertex, bfs)
+			BOOST_GRAPH_EVENT_STUB(on_examine_vertex, bfs)
+			BOOST_GRAPH_EVENT_STUB(on_examine_edge, bfs)
+			BOOST_GRAPH_EVENT_STUB(on_tree_edge, bfs)
+			BOOST_GRAPH_EVENT_STUB(on_non_tree_edge, bfs)
+			BOOST_GRAPH_EVENT_STUB(on_gray_target, bfs)
+			BOOST_GRAPH_EVENT_STUB(on_black_target, bfs)
+			BOOST_GRAPH_EVENT_STUB(on_finish_vertex, bfs)
+
+	protected:
+		Visitors m_vis;
+	};
+	template <class Visitors>
+	bfs_visitor<Visitors>
+		make_bfs_visitor(Visitors vis) {
+		return bfs_visitor<Visitors>(vis);
+	}
+	typedef bfs_visitor<> default_bfs_visitor;
+
+
+	namespace detail {
+
+		template <class VertexListGraph, class ColorMap, class BFSVisitor,
+		class P, class T, class R>
+			void bfs_helper
+			(VertexListGraph& g,
+			typename graph_traits<VertexListGraph>::vertex_descriptor s,
+			ColorMap color,
+			BFSVisitor vis,
+			const bgl_named_params<P, T, R>& params,
+			boost::mpl::false_)
+		{
+			typedef graph_traits<VertexListGraph> Traits;
+			// Buffer default
+			typedef typename Traits::vertex_descriptor Vertex;
+			typedef boost::queue<Vertex> queue_t;
+			queue_t Q;
+			breadth_first_search
+				(g, s,
+				choose_param(get_param(params, buffer_param_t()), boost::ref(Q)).get(),
+				vis, color);
+		}
+
+#ifdef BOOST_GRAPH_USE_MPI
+		template <class DistributedGraph, class ColorMap, class BFSVisitor,
+		class P, class T, class R>
+			void bfs_helper
+			(DistributedGraph& g,
+			typename graph_traits<DistributedGraph>::vertex_descriptor s,
+			ColorMap color,
+			BFSVisitor vis,
+			const bgl_named_params<P, T, R>& params,
+			boost::mpl::true_);
+#endif // BOOST_GRAPH_USE_MPI
+
+		//-------------------------------------------------------------------------
+		// Choose between default color and color parameters. Using
+		// function dispatching so that we don't require vertex index if
+		// the color default is not being used.
+
+		template <class ColorMap>
+		struct bfs_dispatch {
+			template <class VertexListGraph, class P, class T, class R>
+			static void apply
+				(VertexListGraph& g,
+				typename graph_traits<VertexListGraph>::vertex_descriptor s,
+				const bgl_named_params<P, T, R>& params,
+				ColorMap color)
 			{
-				name[parent][loc].second = dist - 1;
+				bfs_helper
+					(g, s, color,
+					choose_param(get_param(params, graph_visitor),
+					make_bfs_visitor(null_visitor())),
+					params,
+					boost::mpl::bool_<
+					boost::is_base_and_derived<
+					distributed_graph_tag,
+					typename graph_traits<VertexListGraph>::traversal_category>::value>());
 			}
-			return;
-		}
-		if (name[parent][loc].second > dist - 1 && dist != 0)
-		{
-			name[parent][loc].second = dist - 1;
-		}
+		};
 
-		search(pair<Edge, int>(Edge(index, parent), dist), loc);
-	};
+		template <>
+		struct bfs_dispatch<param_not_found> {
+			template <class VertexListGraph, class P, class T, class R>
+			static void apply
+				(VertexListGraph& g,
+				typename graph_traits<VertexListGraph>::vertex_descriptor s,
+				const bgl_named_params<P, T, R>& params,
+				param_not_found)
+			{
+				null_visitor null_vis;
 
-	int getnum()
-	{
-		return num_vertices(g);
-	}
-	int getval(int i, int index)
-	{
-		return name[i][index].first;
-	}
-	property_map<BoolGraph, bool_name_t>::type
-		name;
-	BoolGraph g;
-	int grainsize = 9999;
-	int edgefact = 16;
-	vector<int> parts;
-	vector<SubGraph*> neighbors;
-	mutable locker l[64];
-	int part;
-};
-void bfs_search_act(int index, int parent, int loc, int dist, SubGraph* g)
-{
-	g->bfs_search(index, parent, loc, dist);
-}
+				bfs_helper
+					(g, s,
+					make_two_bit_color_map
+					(num_vertices(g),
+					choose_const_pmap(get_param(params, vertex_index),
+					g, vertex_index)),
+					choose_param(get_param(params, graph_visitor),
+					make_bfs_visitor(null_vis)),
+					params,
+					boost::mpl::bool_<
+					boost::is_base_and_derived<
+					distributed_graph_tag,
+					typename graph_traits<VertexListGraph>::traversal_category>::value>());
+			}
+		};
 
-struct MultiComponent
-{
-	void set(vector<int> parts, vector<vector<int>> nodes, int size, int edge, int starts, int nparts)
+	} // namespace detail
+
+#if 1
+	// Named Parameter Variant
+	template <class VertexListGraph, class P, class T, class R>
+	void breadth_first_search
+		(const VertexListGraph& g,
+		typename graph_traits<VertexListGraph>::vertex_descriptor s,
+		const bgl_named_params<P, T, R>& params)
 	{
-		//graphs = vector<SubGraph>(nparts, SubGraph());
-		graphs.resize(nparts);
-		grainsize = size;
-		edgefact = edge;
-		vertexmap = parts;
-		neighbors = vector<SubGraph*>(nparts);
-		for (int i = 0; i < nparts; ++i)
-		{
-			graphs[i].set(nodes, size, edge, starts, i, vertexmap);
-			neighbors[i] = &graphs[i];
-		}
-		for (auto it = graphs.begin(); it != graphs.end(); ++it)
-		{
-			it->neighbors = neighbors;
-		}
-	};
-	static void run(int start, int size, int i, vector<SubGraph*> graphs, vector<int>* vertexmap)
-	{
-		int index = (*vertexmap)[start];
-		(graphs)[index]->bfs_search(start, start, i, 0);
+		// The graph is passed by *const* reference so that graph adaptors
+		// (temporaries) can be passed into this function. However, the
+		// graph is not really const since we may write to property maps
+		// of the graph.
+		VertexListGraph& ng = const_cast<VertexListGraph&>(g);
+		typedef typename get_param_type< vertex_color_t, bgl_named_params<P, T, R> >::type C;
+		detail::bfs_dispatch<C>::apply(ng, s, params,
+			get_param(params, vertex_color));
 	}
-	void search(vector<int> starts)
+#endif
+
+
+	// This version does not initialize colors, user has to.
+
+	template <class IncidenceGraph, class P, class T, class R>
+	void breadth_first_visit
+		(const IncidenceGraph& g,
+		typename graph_traits<IncidenceGraph>::vertex_descriptor s,
+		const bgl_named_params<P, T, R>& params)
 	{
-		int size = grainsize;
-		vector<hpx::future<void>> runs(starts.size());
-		for (int i = 0; i < starts.size(); ++i)
-		{
-			int start = starts[i];
-			runs[i] = hpx::async(&run, start, size, i, neighbors, &vertexmap);
+		// The graph is passed by *const* reference so that graph adaptors
+		// (temporaries) can be passed into this function. However, the
+		// graph is not really const since we may write to property maps
+		// of the graph.
+		IncidenceGraph& ng = const_cast<IncidenceGraph&>(g);
+
+		typedef graph_traits<IncidenceGraph> Traits;
+		// Buffer default
+		typedef typename Traits::vertex_descriptor vertex_descriptor;
+		typedef boost::queue<vertex_descriptor> queue_t;
+		queue_t Q;
+
+		breadth_first_visit
+			(ng, s,
+			choose_param(get_param(params, buffer_param_t()), boost::ref(Q)).get(),
+			choose_param(get_param(params, graph_visitor),
+			make_bfs_visitor(null_visitor())),
+			choose_pmap(get_param(params, vertex_color), ng, vertex_color)
+			);
+	}
+
+	namespace graph {
+		namespace detail {
+			template <typename Graph, typename Source>
+			struct breadth_first_search_impl {
+				typedef void result_type;
+				template <typename ArgPack>
+				void operator()(const Graph& g, const Source& source, const ArgPack& arg_pack) {
+					using namespace boost::graph::keywords;
+					typename boost::graph_traits<Graph>::vertex_descriptor sources[1] = { source };
+					boost::queue<typename boost::graph_traits<Graph>::vertex_descriptor> Q;
+					boost::breadth_first_search(g,
+						&sources[0],
+						&sources[1],
+						boost::unwrap_ref(arg_pack[_buffer | boost::ref(Q)]),
+						arg_pack[_visitor | make_bfs_visitor(null_visitor())],
+						boost::detail::make_color_map_from_arg_pack(g, arg_pack));
+				}
+			};
 		}
-		hpx::wait_all(runs);
-		hpx::finalize();
+		BOOST_GRAPH_MAKE_FORWARDING_FUNCTION(breadth_first_search, 2, 4)
 	}
-	int getmultival(int index, int i)
-	{
-		int start = vertexmap[index];
-		return graphs[start].getval(index,i);
-	}
-	deque<SubGraph> graphs;
-	vector<int> vertexmap;
-	//vector<vector<int>> parents;
-	int grainsize = 9999;
-	int edgefact = 16;
-	vector<SubGraph*> neighbors;
-};
+
+#if 0
+	// Named Parameter Variant
+	BOOST_GRAPH_MAKE_OLD_STYLE_PARAMETER_FUNCTION(breadth_first_search, 2)
+#endif
+
+} // namespace boost
+
+#ifdef BOOST_GRAPH_USE_MPI
+#  include <boost/graph/distributed/breadth_first_search.hpp>
+#endif
+
+#endif // BOOST_GRAPH_BREADTH_FIRST_SEARCH_HPP
 
